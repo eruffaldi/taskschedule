@@ -5,6 +5,11 @@ Emanuele Ruffaldi, Scuola Superiore Sant'Anna 2016
 TODO: edge cost not used for OPTIMIZING CPR (e.g. favouring same processor) BUT it is used in the final cost
 TODO: find a case with earliest meaningful
 
+TODO: compute ALAP The ALAP start-time of a node is a measure of how far the
+nodes start-time can be delayed without increasing the schedule length: http://charm.cs.uiuc.edu/users/arya/docs/6.pdf
+
+TODO: maybe static level = maximum path cost without the edge costs
+
 """
 import heapq
 import fractions
@@ -40,10 +45,11 @@ class MTask:
         self.realend = 0
         self.children = []
         self.top = 0
+        self.slevel = 0
         self.bottom = 0
         self.Np = 0
     def __repr__(self):
-        return "MTask %s cost=%d top=%d bottom=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,[t.id for t in self.sparents],[t.dest.id for t in self.children])
+        return "MTask %s cost=%d top=%s bottom=%s slevel=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,[t.id for t in self.sparents],[t.dest.id for t in self.children])
 
 class Proc:
     """Processor allocation"""
@@ -226,8 +232,10 @@ def updatepriorities(schedule,tasks):
     for t in tasks[::-1]:
         if len(t.children) == 0:
             t.bottom = t.cost
+            t.slevel = t.cost
         else:
             t.bottom = max([p.dest.bottom + p.cost for p in t.children])+t.cost
+            t.slevel = max([p.dest.slevel  for p in t.children])+t.cost
 
 
 def annotatetasks(tasks):
@@ -247,8 +255,10 @@ def annotatetasks(tasks):
     for t in tasks[::-1]:
         if len(t.children) == 0:
             t.bottom = t.cost
+            t.slevel = t.cost
         else:
             t.bottom = max([p.dest.bottom + p.cost  for p in t.children])+t.cost
+            t.slevel = max([p.dest.slevel   for p in t.children])+t.cost
 
 
 def loadtasksjson(fp):
@@ -256,7 +266,7 @@ def loadtasksjson(fp):
     # inputs can be id of task or (id,cost)
     def makedge(x,d):
         if type(x) is list:
-            return MTaskEdge(x[0],d,int(x[1]))
+            return MTaskEdge(x[0],d,float(x[1]))
         else:
             return MTaskEdge(x,d,0)
     ts = []
@@ -295,7 +305,7 @@ def loadtasksdot(fp):
     for n in g2.get_nodes():   
         ad =      n.get_attributes()
         #print n.get_name(),[a for a in ad]
-        t = MTask(n.get_name(),int(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)))
+        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)))
         tasks.append(t)
         tasksd[t.id] = t
     # if present use the attribute cost
@@ -313,7 +323,7 @@ def loadtasksdot(fp):
             dt = MTask(e.get_destination(),1,defaultcore)
             tasks.append(dt)
             tasksd[dt.id] = dt
-        dt.parents.append(MTaskEdge(st,dt,int(e.get_attributes().get("cost",0))))
+        dt.parents.append(MTaskEdge(st,dt,float(e.get_attributes().get("cost",0))))
 
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks

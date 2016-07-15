@@ -1,0 +1,27 @@
+digraph G {
+	#http://charm.cs.uiuc.edu/users/arya/docs/6.pdf
+	n1 [cost=2];
+	n2 [cost=3];
+	n3 [cost=3];
+	n4 [cost=4];
+	n5 [cost=5];
+	n6 [cost=4];
+	n7 [cost=4];
+	n8 [cost=4];
+	n9 [cost=1];
+
+	n1 -> n2 [cost=4];
+	n1 -> n3 [cost=1];
+	n1 -> n4 [cost=1];
+	n1 -> n5 [cost=1];
+	n1 -> n7 [cost=10];
+
+	n2 -> n6  [cost=1];
+	n2 -> n7  [cost=1];
+	n3 -> n8  [cost=1];
+	n4 -> n8  [cost=1];
+
+	n6 -> n9  [cost=5];
+	n7 -> n9  [cost=6];
+	n8 -> n9  [cost=5]
+}
