@@ -1,0 +1,270 @@
+{
+	"tasks" :
+	[
+		{
+			"id" : 1,
+			"cost" : 9.000000,
+			"messages" : ["from 14 to 27"]
+		},
+		{
+			"id" : 2,
+			"cost" : 9.000000,
+			"messages" : ["from 13 to 26"]
+		},
+		{
+			"id" : 3,
+			"cost" : 9.000000,
+			"messages" : ["from 12 to 25"]
+		},
+		{
+			"id" : 4,
+			"cost" : 9.000000,
+			"messages" : ["from 8 to 21"]
+		},
+		{
+			"id" : 5,
+			"cost" : 9.000000,
+			"messages" : ["from 9 to 22"]
+		},
+		{
+			"id" : 6,
+			"cost" : 9.000000,
+			"messages" : ["from 10 to 23"]
+		},
+		{
+			"id" : 7,
+			"cost" : 9.000000,
+			"messages" : ["from 11 to 24"]
+		},
+		{
+			"id" : 8,
+			"cost" : 8.000000,
+			"messages" : ["from 27 to 7"],
+			"inputs" : [1]
+
+		},
+		{
+			"id" : 9,
+			"cost" : 8.000000,
+			"messages" : ["from 26 to 6"],
+			"inputs" : [2]
+
+		},
+		{
+			"id" : 10,
+			"cost" : 8.000000,
+			"messages" : ["from 25 to 5"],
+			"inputs" : [3]
+
+		},
+		{
+			"id" : 11,
+			"cost" : 8.000000,
+			"messages" : ["from 24 to 4"],
+			"inputs" : [7]
+
+		},
+		{
+			"id" : 12,
+			"cost" : 8.000000,
+			"messages" : ["from 21 to 1"],
+			"inputs" : [4]
+
+		},
+		{
+			"id" : 13,
+			"cost" : 8.000000,
+			"messages" : ["from 22 to 2"],
+			"inputs" : [5]
+
+		},
+		{
+			"id" : 14,
+			"cost" : 8.000000,
+			"messages" : ["from 23 to 3"],
+			"inputs" : [6]
+
+		},
+		{
+			"id" : 15,
+			"cost" : 6.000000,
+			"messages" : ["from 7 to 20"],
+			"inputs" : [8]
+
+		},
+		{
+			"id" : 16,
+			"cost" : 6.000000,
+			"messages" : ["from 20 to 6"],
+			"inputs" : [15]
+
+		},
+		{
+			"id" : 17,
+			"cost" : 6.000000,
+			"messages" : ["from 6 to 19"],
+			"inputs" : [9,16]
+
+		},
+		{
+			"id" : 18,
+			"cost" : 6.000000,
+			"messages" : ["from 19 to 5"],
+			"inputs" : [17]
+
+		},
+		{
+			"id" : 19,
+			"cost" : 6.000000,
+			"messages" : ["from 5 to 18"],
+			"inputs" : [10,18]
+
+		},
+		{
+			"id" : 20,
+			"cost" : 6.000000,
+			"messages" : ["from 18 to 4"],
+			"inputs" : [19]
+
+		},
+		{
+			"id" : 21,
+			"cost" : 6.000000,
+			"messages" : ["from 4 to 17"],
+			"inputs" : [11,20]
+
+		},
+		{
+			"id" : 22,
+			"cost" : 6.000000,
+			"messages" : ["from 17 to 3"],
+			"inputs" : [21]
+
+		},
+		{
+			"id" : 23,
+			"cost" : 6.000000,
+			"messages" : ["from 3 to 16"],
+			"inputs" : [14,22]
+
+		},
+		{
+			"id" : 24,
+			"cost" : 6.000000,
+			"messages" : ["from 16 to 2"],
+			"inputs" : [23]
+
+		},
+		{
+			"id" : 25,
+			"cost" : 6.000000,
+			"messages" : ["from 2 to 15"],
+			"inputs" : [13,24]
+
+		},
+		{
+			"id" : 26,
+			"cost" : 6.000000,
+			"messages" : ["from 15 to 1"],
+			"inputs" : [25]
+
+		},
+		{
+			"id" : 27,
+			"cost" : 4.000000,
+			"messages" : ["from 1 to 28"],
+			"inputs" : [12,26]
+
+		},
+		{
+			"id" : 28,
+			"cost" : 4.000000,
+			"messages" : ["from 28 to 1"],
+			"inputs" : [27]
+
+		},
+		{
+			"id" : 29,
+			"cost" : 6.000000,
+			"messages" : ["from 1 to 15"],
+			"inputs" : [12,26,28]
+
+		},
+		{
+			"id" : 30,
+			"cost" : 6.000000,
+			"messages" : ["from 15 to 2"],
+			"inputs" : [25,29]
+
+		},
+		{
+			"id" : 31,
+			"cost" : 6.000000,
+			"messages" : ["from 2 to 16"],
+			"inputs" : [13,24,30]
+
+		},
+		{
+			"id" : 32,
+			"cost" : 6.000000,
+			"messages" : ["from 16 to 3"],
+			"inputs" : [23,31]
+
+		},
+		{
+			"id" : 33,
+			"cost" : 6.000000,
+			"messages" : ["from 3 to 17"],
+			"inputs" : [14,22,32]
+
+		},
+		{
+			"id" : 34,
+			"cost" : 6.000000,
+			"messages" : ["from 17 to 4"],
+			"inputs" : [21,33]
+
+		},
+		{
+			"id" : 35,
+			"cost" : 6.000000,
+			"messages" : ["from 4 to 18"],
+			"inputs" : [11,20,34]
+
+		},
+		{
+			"id" : 36,
+			"cost" : 6.000000,
+			"messages" : ["from 18 to 5"],
+			"inputs" : [19,35]
+
+		},
+		{
+			"id" : 37,
+			"cost" : 6.000000,
+			"messages" : ["from 5 to 19"],
+			"inputs" : [10,18,36]
+
+		},
+		{
+			"id" : 38,
+			"cost" : 6.000000,
+			"messages" : ["from 19 to 6"],
+			"inputs" : [17,37]
+
+		},
+		{
+			"id" : 39,
+			"cost" : 6.000000,
+			"messages" : ["from 6 to 20"],
+			"inputs" : [9,16,38]
+		},
+		{
+			"id" : 40,
+			"cost" : 6.000000,
+			"messages" : ["from 20 to 7"],
+			"inputs" : [15,39]
+
+		}
+	]
+}
