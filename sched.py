@@ -1,9 +1,9 @@
 """
-CBR scheduling
+CPR scheduling
 Emanuele Ruffaldi, Scuola Superiore Sant'Anna 2016
 
-Note: edge cost not used in CBR: correct approach should consider EDGE cost only when moving between a given processor to another BUT this is not
-fundamental for multicore.
+TODO: edge cost not used for OPTIMIZING CPR (e.g. favouring same processor) BUT it is used in the final cost
+TODO: find a case with earliest meaningful
 
 """
 import heapq
@@ -14,10 +14,51 @@ from collections import OrderedDict
 from functools import reduce as _reduce
 import json
 
+# global for controlling computation in fraction vs float
 makenumbers = fractions.Fraction
+# global for controlling number of cores (0=max)
 defaultcore = 0 # ALL
 
-#https://pypi.python.org/pypi/toposort/1.0
+
+class MTaskEdge:
+    """Edge of a M-Task with edge cost"""
+    def __init__(self,source,dest,cost):
+        self.source = source
+        self.dest = dest
+        self.cost = makenumbers(cost)
+
+class MTask:
+    """M-Task"""
+    def __init__(self,id,cost,maxnp):
+        self.id = id       # identifier
+        self.parents = [] # inputs as MTaskEdge
+        self.maxnp = maxnp # maximu number of processors (0=all)
+        self.cost = makenumbers(cost)     # cost values
+
+        # computed
+        self.sparents = set() 
+        self.realend = 0
+        self.children = []
+        self.top = 0
+        self.bottom = 0
+        self.Np = 0
+    def __repr__(self):
+        return "MTask %s cost=%d top=%d bottom=%d parents=%s" % (self.id,self.cost,self.top,self.bottom,[t.id for t in self.sparents])
+
+class Proc:
+    """Processor allocation"""
+    def __init__(self,index):
+        self.index = index
+        self.tasks = []
+        self.next = 0
+    def __repr__(self):
+        if makenumbers == float:
+            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%2.f %2.f]" % (t.id,s,e,) for s,e,t in self.tasks]))
+        else:
+            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (t.id,s,e,) for s,e,t in self.tasks]))
+
+
+# Taken from: https://pypi.python.org/pypi/toposort/1.0
 def toposort(data):
     """Dependencies are expressed as a dictionary whose keys are items
 and whose values are a set of dependent items. Output is a list of
@@ -59,6 +100,7 @@ make the results deterministic)."""
         result.extend((sorted if sort else list)(d))
     return result
 
+# sorts tasks topologically
 def toposorttasks(data,sort=True):
     qd = dict([(t.id,t) for t in data]) # build the dictionary for reconstruction
     q = dict([(t.id,set([p.id for p in t.sparents])) for t in data]) # build dependency as list of id
@@ -66,44 +108,8 @@ def toposorttasks(data,sort=True):
     # back from id tho objects list
     return [qd[i] for i in toposort_flatten(q,sort=sort)]
 
-class MTaskEdge:
-    def __init__(self,source,dest,cost):
-        self.source = source
-        self.dest = dest
-        self.cost = makenumbers(cost)
-
-class MTask:
-    def __init__(self,id,cost,maxnp):
-        self.parents = [] # inputs as MTaskEdge
-        self.sparents = set() 
-        self.cost = makenumbers(cost)     # cost values
-        self.id = id       # identifier
-        self.sync = True   # synchronize parallel instances
-        self.maxnp = maxnp
-
-        # computed
-        self.realend = 0
-        self.children = []
-        self.top = 0
-        self.bottom = 0
-        self.Np = 0
-    def __repr__(self):
-        return "MTask %s cost=%d top=%d bottom=%d parents=%s" % (self.id,self.cost,self.top,self.bottom,[t.id for t in self.sparents])
-
-# processor allocation
-class Proc:
-    def __init__(self,index):
-        self.index = index
-        self.tasks = []
-        self.next = 0
-    def __repr__(self):
-        if makenumbers == float:
-            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%2.f %2.f]" % (t.id,s,e,) for s,e,t in self.tasks]))
-        else:
-            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (t.id,s,e,) for s,e,t in self.tasks]))
-
 def MLS(tasks,numCores,args):
-
+    """Computes MLS"""
     proco = [Proc(i) for i in range(1,numCores+1)]
     procpq = []
     for p in proco:
@@ -117,7 +123,7 @@ def MLS(tasks,numCores,args):
     for t in tasks:
         t.realend = None
         if len(t.sparents) == 0:
-            heapq.heappush(ready,(t.bottom,t)) # or priority, in any case i s0
+            heapq.heappush(ready,(0,t)) # for entries the earliest==bottom==0
 
     #print "!!starting with ready",len(ready),"and needed ",len(needed)
     while len(needed) > 0:        
@@ -129,7 +135,10 @@ def MLS(tasks,numCores,args):
                 if t.realend is None and len(set(t.sparents)-done) == 0: # TODO: improve this
                     #print "\tadding",t.id,"at",justdonetime
                     t.realend = justdonetime # minimum time for this due to this LAST parent
-                    heapq.heappush(ready,(t.bottom,t)) # or priority, in any case i s0
+                    if args.earliest:
+                        heapq.heappush(ready,(justdonetime,t)) # or priority, in any case i s0
+                    else:
+                        heapq.heappush(ready,(t.bottom,t)) # or priority, in any case i s0
                    
         # lowest bottom level
         pri,t = heapq.heappop(ready)
@@ -163,15 +172,12 @@ def MLS(tasks,numCores,args):
             heapq.heappush(procpq,(p.next,p))
         heapq.heappush(running,(tend,t))
 
-
-
-
     # end time is max
     index, max_next = max(enumerate(proco),key=lambda p: p[1].next)
     return max_next.next,proco
 
 def cpr(tasks,numCores,args):
-
+    """Computes using CPR"""
     # clean assignments
     for t in tasks:
         t.Np = 1
@@ -286,7 +292,7 @@ def loadtasksdot(fp):
     return tasks
 
 def analyzeschedule(schedule,task):
-    # compute the execution times
+    """Analyzes Schedule for Errors"""
     for t in tasks:
         t.realend = None
     avgs = []
@@ -317,10 +323,11 @@ if __name__ == "__main__":
 
     import argparse
     parser = argparse.ArgumentParser(description='Scheduling Tester')
-    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm')
+    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none')
     parser.add_argument('input',help="input file")  
     parser.add_argument('--cores',type=int,default=4,help="number of cores")
     parser.add_argument('--verbose',action="store_true")
+    parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom for the MLS")
     parser.add_argument('--usefloats',action="store_true")
     parser.add_argument('--allunicore',action="store_true")
 
@@ -348,11 +355,13 @@ if __name__ == "__main__":
     if args.algorithm == "cpr":
         r = cpr(tasks,args.cores,args)  
         e = analyzeschedule(r["schedule"],tasks)
-        print "Total",r["T"]
         for p in r["schedule"]:
             print p
         print e
+        print "Total",float(r["T"])
     elif args.algorithm == "none":
         print "Tasks",len(tasks)
         for t in tasks:
             print t
+    else:
+        print "unknown algorithm",args.algorithm
