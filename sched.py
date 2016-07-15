@@ -15,6 +15,7 @@ from functools import reduce as _reduce
 import json
 
 makenumbers = fractions.Fraction
+defaultcore = 0 # ALL
 
 #https://pypi.python.org/pypi/toposort/1.0
 def toposort(data):
@@ -70,14 +71,15 @@ class MTaskEdge:
         self.source = source
         self.dest = dest
         self.cost = makenumbers(cost)
+
 class MTask:
-    def __init__(self,id,cost):
+    def __init__(self,id,cost,maxnp):
         self.parents = [] # inputs as MTaskEdge
         self.sparents = set() 
         self.cost = makenumbers(cost)     # cost values
         self.id = id       # identifier
         self.sync = True   # synchronize parallel instances
-        # TODO: max number of processors, plus maybe affinity
+        self.maxnp = maxnp
 
         # computed
         self.realend = 0
@@ -185,17 +187,20 @@ def cpr(tasks,numCores,args):
         while len(chi) > 0:   # PAPER: until T modified or chi empty
             index, max_value_ignored = max(enumerate([t.top+t.bottom for t in chi]), key=operator.itemgetter(1))
             t = chi[index]
-            t.Np += 1
-            # try distribution using given unmber of cores for given processor
-            Ti,tai = MLS(tasks,numCores,args)
-            #print "tried upgrade of ",t.id," with ",t.Np," obtaining ",Ti,"vs previous",T
-            if Ti < T:                
-                T = Ti
-                ta = tai
-                Tchanged = True
-            else:
-                t.Np -= 1
+            if t.Np == t.maxnp: #saturated
                 del chi[index]
+            else:
+                t.Np += 1
+                # try distribution using given unmber of cores for given processor
+                Ti,tai = MLS(tasks,numCores,args)
+                #print "tried upgrade of ",t.id," with ",t.Np," obtaining ",Ti,"vs previous",T
+                if Ti < T:                
+                    T = Ti
+                    ta = tai
+                    Tchanged = True
+                else:
+                    t.Np -= 1
+                    del chi[index]
     return dict(schedule=ta,T=T)
 
 def annotatetasks(tasks):
@@ -229,7 +234,7 @@ def loadtasksjson(fp):
     if type(j) == dict:
         # each a dictionary
         for id,ta in j.iteritems():
-            t = MTask(id,ta["cost"])
+            t = MTask(id,ta.get("cost",1),ta.get("maxnp",defaultcore))
             ts.append(t)
             td[t.id] = t
         for id,ta in j.iteritems():
@@ -238,7 +243,7 @@ def loadtasksjson(fp):
     else:
         # each is a list with 
         for ta in j:
-            t = MTask(ta["id"],ta["cost"])
+            t = MTask(ta["id"],ta.get("cost",1),ta.get("maxnp",defaultcore))
             ts.append(t)
             td[t.id] = t
         for ta in j:
@@ -257,7 +262,7 @@ def loadtasksdot(fp):
     for n in g2.get_nodes():   
         ad =      n.get_attributes()
         #print n.get_name(),[a for a in ad]
-        t = MTask(n.get_name(),int(ad.get("cost",1)))
+        t = MTask(n.get_name(),int(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)))
         tasks.append(t)
         tasksd[t.id] = t
     # if present use the attribute cost
@@ -267,12 +272,12 @@ def loadtasksdot(fp):
         #get_attributes
         st = tasksd.get(e.get_source(),None)
         if st is None:
-            st = MTask(e.get_source(),1)
+            st = MTask(e.get_source(),1,defaultcore)
             tasks.append(st)
             tasksd[st.id] = st
         dt = tasksd.get(e.get_destination(),None)
         if dt is None:
-            dt = MTask(e.get_destination(),1)
+            dt = MTask(e.get_destination(),1,defaultcore)
             tasks.append(dt)
             tasksd[dt.id] = dt
         dt.parents.append(MTaskEdge(st,dt,int(e.get_attributes().get("cost",0))))
@@ -317,11 +322,15 @@ if __name__ == "__main__":
     parser.add_argument('--cores',type=int,default=4,help="number of cores")
     parser.add_argument('--verbose',action="store_true")
     parser.add_argument('--usefloats',action="store_true")
+    parser.add_argument('--allunicore',action="store_true")
 
     args = parser.parse_args()
 
     if args.usefloats:
         makenumbers = float
+
+    if args.allunicore:
+        defaultcore = 1
 
     if args.input.endswith(".json"):
         tasks = loadtasksjson(open(args.input,"rb"))
@@ -344,5 +353,6 @@ if __name__ == "__main__":
             print p
         print e
     elif args.algorithm == "none":
+        print "Tasks",len(tasks)
         for t in tasks:
             print t
