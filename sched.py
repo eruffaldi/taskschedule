@@ -7,11 +7,14 @@ fundamental for multicore.
 
 """
 import heapq
+import fractions
 import argparse
 import operator
 from collections import OrderedDict
 from functools import reduce as _reduce
 import json
+
+makenumbers = fractions.Fraction
 
 #https://pypi.python.org/pypi/toposort/1.0
 def toposort(data):
@@ -66,12 +69,12 @@ class MTaskEdge:
     def __init__(self,source,dest,cost):
         self.source = source
         self.dest = dest
-        self.cost = cost
+        self.cost = makenumbers(cost)
 class MTask:
-    def __init__(self,id,c):
+    def __init__(self,id,cost):
         self.parents = [] # inputs as MTaskEdge
         self.sparents = set() 
-        self.cost = c     # cost values
+        self.cost = makenumbers(cost)     # cost values
         self.id = id       # identifier
         self.sync = True   # synchronize parallel instances
         # TODO: max number of processors, plus maybe affinity
@@ -92,7 +95,10 @@ class Proc:
         self.tasks = []
         self.next = 0
     def __repr__(self):
-        return "Proc(%d) ends %.2f tasks: %s" % (self.index,self.next,", ".join(["(%.2f %.2f %s)" % (s,e,t.id) for s,e,t in self.tasks]))
+        if makenumbers == float:
+            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%2.f %2.f]" % (t.id,s,e,) for s,e,t in self.tasks]))
+        else:
+            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (t.id,s,e,) for s,e,t in self.tasks]))
 
 def MLS(tasks,numCores,args):
 
@@ -145,7 +151,7 @@ def MLS(tasks,numCores,args):
         #        lastprocstart = lastparentend
         #        #print "adjusted due to dependency",t.id,lastparentend
         allinputcosts = sum([x.cost for x in t.parents])
-        duration = allinputcosts + t.cost/float(len(picked))
+        duration = allinputcosts + t.cost/makenumbers(len(picked))
         for oldnext,p in picked:
             tend = lastprocstart + duration
             # TODO: add edge cost IF all inputs
@@ -300,7 +306,7 @@ def analyzeschedule(schedule,task):
             if pa.realend is None or pa.realend > b:
                 print "inversion error for",t.id,"with",pa.id
                 errors += 1
-    return dict(avgslack=sum(avgs)/len(schedule),used=len(avgs),errors=errors)
+    return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors)
     
 if __name__ == "__main__":
 
@@ -310,8 +316,12 @@ if __name__ == "__main__":
     parser.add_argument('input',help="input file")  
     parser.add_argument('--cores',type=int,default=4,help="number of cores")
     parser.add_argument('--verbose',action="store_true")
+    parser.add_argument('--usefloats',action="store_true")
 
     args = parser.parse_args()
+
+    if args.usefloats:
+        makenumbers = float
 
     if args.input.endswith(".json"):
         tasks = loadtasksjson(open(args.input,"rb"))
