@@ -43,7 +43,7 @@ class MTask:
         self.bottom = 0
         self.Np = 0
     def __repr__(self):
-        return "MTask %s cost=%d top=%d bottom=%d parents=%s" % (self.id,self.cost,self.top,self.bottom,[t.id for t in self.sparents])
+        return "MTask %s cost=%d top=%d bottom=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,[t.id for t in self.sparents],[t.dest.id for t in self.children])
 
 class Proc:
     """Processor allocation"""
@@ -140,7 +140,7 @@ def MLS(tasks,numCores,args):
                     else:
                         heapq.heappush(ready,(t.bottom,t)) # or priority, in any case i s0
                    
-        # lowest bottom level
+        # get highest priority
         pri,t = heapq.heappop(ready)
         needed.remove(t)
         done.add(t)
@@ -148,6 +148,7 @@ def MLS(tasks,numCores,args):
 
         # fix me
         if t.Np > len(procpq):
+            print "bug" 
             return 1e100,[]
         picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
         lastprocstart = picked[-1][1].next
@@ -209,20 +210,46 @@ def cpr(tasks,numCores,args):
                     del chi[index]
     return dict(schedule=ta,T=T)
 
+def updatepriorities(schedule,tasks):
+    """update priorities with effective schedule
+
+    TODO use schedule
+    TODO use change of processor cost
+    TODO note that we need the decomposition level for the given task for affecting the edge cost
+    """
+    for t in tasks:
+        if len(t.parents) == 0:
+            t.top = 0
+        else:
+            t.top = max([p.source.top + p.source.cost + p.cost for p in t.parents])
+
+    for t in tasks[::-1]:
+        if len(t.children) == 0:
+            t.bottom = t.cost
+        else:
+            t.bottom = max([p.dest.bottom + p.cost for p in t.children])+t.cost
+
+
 def annotatetasks(tasks):
-    """compute children, top and bottom"""
+    """compute children, top and bottom with no allocation"""
     for t in tasks:
         t.children = []
     for t in tasks:
         if len(t.parents) == 0:
             t.top = 0
-            t.bottom = 0
         else:
             t.sparents = set([x.source for x in t.parents])
-            t.bottom = min([p.bottom + p.cost for p in t.sparents])
-            t.top = max([p.top + p.cost for p in t.sparents])
-        for p in t.sparents:         
-            p.children.append(t)
+            t.top = max([p.source.top + p.source.cost + p.cost for p in t.parents])
+            #t.top = max([p.top + p.cost for p in t.sparents])
+        for p in t.parents:         
+            p.source.children.append(p)
+
+    for t in tasks[::-1]:
+        if len(t.children) == 0:
+            t.bottom = t.cost
+        else:
+            t.bottom = max([p.dest.bottom + p.cost  for p in t.children])+t.cost
+
 
 def loadtasksjson(fp):
     # array/dictionary of task with "id","cost","inputs"
@@ -291,7 +318,8 @@ def loadtasksdot(fp):
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
 
-def analyzeschedule(schedule,task):
+
+def analyzeschedule(schedule,tasks):
     """Analyzes Schedule for Errors"""
     for t in tasks:
         t.realend = None

@@ -13,6 +13,7 @@ The M-Task model comprises:
 - maximum number of processors (extended wrt CPR)
 - cost of edges between nodes (accounting for data transfer)
 
+See examples for testing
 
 Command Line
 ===========	
@@ -40,6 +41,5 @@ Command Line
 References
 =========
 Dumler et al., A Scheduling Toolkit for Multiprocessor-Task Programming with Dependencies, EUROPAR (2007)
-
 
 Radulescu, A., Nicolescu, C., van Gemund, A., Jonker, P.: CPR: Mixed Task and Data Parallel Scheduling for Distributed Systems. In: IPDPS ’01: Proc. of the 15th Int. Par. & Distr. Processing Symp., IEEE Computer Society (2001) 39
