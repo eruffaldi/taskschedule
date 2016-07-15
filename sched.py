@@ -92,7 +92,7 @@ class Proc:
         self.tasks = []
         self.next = 0
     def __repr__(self):
-        return "Proc(%d) ends %f tasks: %s" % (self.index,self.next,[(s,e,t.id) for s,e,t in self.tasks])
+        return "Proc(%d) ends %.2f tasks: %s" % (self.index,self.next,", ".join(["(%.2f %.2f %s)" % (s,e,t.id) for s,e,t in self.tasks]))
 
 def MLS(tasks,numCores,args):
 
@@ -144,7 +144,8 @@ def MLS(tasks,numCores,args):
         #    if lastparentend > lastprocstart:
         #        lastprocstart = lastparentend
         #        #print "adjusted due to dependency",t.id,lastparentend
-        duration = t.cost/float(len(picked))
+        allinputcosts = sum([x.cost for x in t.parents])
+        duration = allinputcosts + t.cost/float(len(picked))
         for oldnext,p in picked:
             tend = lastprocstart + duration
             # TODO: add edge cost IF all inputs
@@ -211,7 +212,7 @@ def loadtasksjson(fp):
     # inputs can be id of task or (id,cost)
     def makedge(x,d):
         if type(x) is list:
-            return MTaskEdge(x[0],d,x[1])
+            return MTaskEdge(x[0],d,int(x[1]))
         else:
             return MTaskEdge(x,d,0)
     ts = []
@@ -268,7 +269,7 @@ def loadtasksdot(fp):
             dt = MTask(e.get_destination(),1)
             tasks.append(dt)
             tasksd[dt.id] = dt
-        dt.parents.append(MTaskEdge(st,dt,e.get_attributes().get("cost",0)))
+        dt.parents.append(MTaskEdge(st,dt,int(e.get_attributes().get("cost",0))))
 
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
