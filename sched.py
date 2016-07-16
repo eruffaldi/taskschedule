@@ -41,13 +41,15 @@ class MTask:
         self.cost = makenumbers(cost)     # cost values
 
         # computed
-        self.sparents = set() 
-        self.realend = 0
-        self.children = []
-        self.top = 0
-        self.slevel = 0
-        self.bottom = 0
-        self.Np = 0
+        self.sparents = set()  # tasks in parents
+        self.endtime = 0       # time of last proc running task
+        self.earlieststart = 0 # time of effectiv first start among tasks in proc
+        self.children = []     # computed children
+        self.proc = set() # processors used
+        self.top = 0        # t-level
+        self.slevel = 0     # s-level (not counitng edge cost)
+        self.bottom = 0     # b-level
+        self.Np = 0         # effective number of processor (request)
     def __repr__(self):
         return "MTask %s cost=%d top=%s bottom=%s slevel=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,[t.id for t in self.sparents],[t.dest.id for t in self.children])
 
@@ -59,7 +61,7 @@ class Proc:
         self.next = 0
     def __repr__(self):
         if makenumbers == float:
-            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%2.f %2.f]" % (t.id,s,e,) for s,e,t in self.tasks]))
+            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f]" % (t.id,s,e,) for s,e,t in self.tasks]))
         else:
             return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (t.id,s,e,) for s,e,t in self.tasks]))
 
@@ -126,21 +128,28 @@ def MLS(tasks,numCores,args):
     done = set()
     running = [] # heap
 
+    # clear schedule and add entry in ready list
     for t in tasks:
-        t.realend = None
+        t.proc = set()
+        t.earlieststart = None
+        t.endtime = None
         if len(t.sparents) == 0:
             heapq.heappush(ready,(0,t)) # for entries the earliest==bottom==0
 
     #print "!!starting with ready",len(ready),"and needed ",len(needed)
     while len(needed) > 0:        
+
+        # if no more ready populate them picking from available in running
         while len(ready) == 0 and len(running) != 0:
             #print "need to fulfill some from running",len(running)
             # compute which is ready 
             justdonetime,justdone = heapq.heappop(running)
-            for t in justdone.children:
-                if t.realend is None and len(set(t.sparents)-done) == 0: # TODO: improve this
-                    #print "\tadding",t.id,"at",justdonetime
-                    t.realend = justdonetime # minimum time for this due to this LAST parent
+            for e in justdone.children:
+                t = e.dest
+                if t.earlieststart is None and len(set(t.sparents)-done) == 0: # TODO: improve efficiency of this
+                    t.earlieststart = justdonetime # minimum time for this due to this LAST parent
+                    # TODO: should we add the input costs?
+                    #print "adding",t.id,"earliest",justdonetime
                     if args.earliest:
                         heapq.heappush(ready,(justdonetime,t)) # or priority, in any case i s0
                     else:
@@ -150,34 +159,46 @@ def MLS(tasks,numCores,args):
         pri,t = heapq.heappop(ready)
         needed.remove(t)
         done.add(t)
-        #print "picked ready",t.id
 
-        # fix me
+        # we cannot allocate due to the lack of available processors
         if t.Np > len(procpq):
-            print "bug" 
             return 1e100,[]
         picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
-        lastprocstart = picked[-1][1].next
-        if lastprocstart < t.realend:
-            lastprocstart = t.realend 
-        #print "picked processors",picked
-
-        # THE FOLLOWING IS NOT IN THE PAPER
-        #if len(t.parents) > 0:
-        #    lastparentend = max([p.realend for p in t.parents])
-        #    if lastparentend > lastprocstart:
-        #        lastprocstart = lastparentend
-        #        #print "adjusted due to dependency",t.id,lastparentend
+        
+        # split cost due to parallelims, precompute all input transfers
+        basecost = t.cost/makenumbers(len(picked))
         allinputcosts = sum([x.cost for x in t.parents])
-        duration = allinputcosts + t.cost/makenumbers(len(picked))
-        for oldnext,p in picked:
-            tend = lastprocstart + duration
-            # TODO: add edge cost IF all inputs
-            p.tasks.append((lastprocstart,tend,t)) # p.next-lastprocstart IS flexibility
-            p.next = tend
-            t.realend = tend
+        duration = allinputcosts + basecost
+
+        earlieststart = None
+        for pnext,p in picked:
+            if args.samezerocost:
+                # per p duration depends on the edge transferts
+                allinputcosts = 0
+                for x in t.parents: # for all parents of t
+                    if p in x.source.proc: # for all the k processors in which it has been split, if they contain p we can skip 1/k data transfer
+                        if len(x.source.proc) > 1: #
+                            allinputcosts += x.cost*makenumbers(len(x.source.proc)-1)/makenumbers(len(x.source.proc)) # all except p
+                    else:
+                        allinputcosts += x.cost # full cost being outside
+                duration = allinputcosts + basecost
+
+            # compute execution range
+            tstart = max(pnext,t.earlieststart)
+            tend = tstart + duration
+            if earlieststart is None:
+                earlieststart = tstart
+            
+            p.tasks.append((tstart,tend,t)) # tstart-pnext IS flexibility
+            p.next = tend # marks next available
+
+            t.proc.add(p)
             heapq.heappush(procpq,(p.next,p))
-        heapq.heappush(running,(tend,t))
+
+        t.endtime = tend # the last will be the latest 
+        t.earlieststart = earlieststart
+
+        heapq.heappush(running,(t.endtime,t)) # tend is the end of the last proc for task t
 
     # end time is max
     index, max_next = max(enumerate(proco),key=lambda p: p[1].next)
@@ -331,30 +352,34 @@ def loadtasksdot(fp):
 
 def analyzeschedule(schedule,tasks):
     """Analyzes Schedule for Errors"""
-    for t in tasks:
-        t.realend = None
     avgs = []
     errors = 0
-    runs = []
+    #runs = []
     for p in schedule:
         last = 0
         slacks = []
         for b,e,t in p.tasks:
             slacks.append(b-last)
             last = e
-            t.realend = b 
-            heapq.heappush(runs,(b,(t,e,p.index)))
+            #heapq.heappush(runs,(b,(t,e,p.index)))
         if len(slacks) == 0: # unused
             continue
         avgs.append(sum(slacks)/len(slacks))
 
-    while len(runs) > 0:
-        b,o = heapq.heappop(runs)
-        t,e,index = o
-        for pa in t.sparents:
-            if pa.realend is None or pa.realend > b:
-                print "inversion error for",t.id,"with",pa.id
-                errors += 1
+    for t in tasks:
+        for s in t.sparents:
+            if t.earlieststart < s.endtime:
+                print "inversion for ",t.id," against ",s.id
+    # we have stored all the runs ordered by 
+    #while len(runs) > 0:
+    #    b,o = heapq.heappop(runs)
+    #    t,e,index = o
+    #    if args.verbose:
+    #        print "%s %s on %d of T %s" % (b,e,index,t.id)
+    #    for pa in t.sparents:
+    #        if pa.realend is None or pa.realend > b:
+    #            print "inversion error for T",t.id,"starts ",pa.id
+    #            errors += 1
     return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors)
     
 if __name__ == "__main__":
@@ -366,8 +391,9 @@ if __name__ == "__main__":
     parser.add_argument('--cores',type=int,default=4,help="number of cores")
     parser.add_argument('--verbose',action="store_true")
     parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom for the MLS")
-    parser.add_argument('--usefloats',action="store_true")
-    parser.add_argument('--allunicore',action="store_true")
+    parser.add_argument('--usefloats',action="store_true",help="compute using floats")
+    parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
+    parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
 
     args = parser.parse_args()
 
