@@ -388,16 +388,16 @@ def analyzeschedule(schedule,tasks):
 if __name__ == "__main__":
 
     import argparse
-    parser = argparse.ArgumentParser(description='Scheduling Tester')
+    parser = argparse.ArgumentParser(description='Task Scheduling for Multiprocessor - Emanuele Ruffaldi 2016 SSSA')
     parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none')
     parser.add_argument('input',help="input file")  
-    parser.add_argument('--cores',type=int,default=4,help="number of cores")
+    parser.add_argument('--cores',type=int,default=4,help="number of cores for the scheduling")
     parser.add_argument('--verbose',action="store_true")
-    parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom for the MLS")
-    parser.add_argument('--usefloats',action="store_true",help="compute using floats")
+    parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom-level for the MLS")
+    parser.add_argument('--usefloats',action="store_true",help="compute using floats instead of fractions")
     parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
     parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
-    parser.add_argument('--transitive',action="store_true",help="transitive reduction with samezerocost")
+    parser.add_argument('--transitive',action="store_true",help="transitive reduction (activates --samezerocost)")
     parser.add_argument('--output',help="JSON output of scheduling")
 
     args = parser.parse_args()

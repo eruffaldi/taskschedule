@@ -17,12 +17,10 @@ See examples for testing
 
 Command Line
 ===========	
-
 	usage: sched.py [-h] [--algorithm ALGORITHM] [--cores CORES] [--verbose]
-	                [--earliest] [--usefloats] [--allunicore]
+	                [--earliest] [--usefloats] [--allunicore] [--samezerocost]
+	                [--transitive] [--output OUTPUT]
 	                input
-
-	Scheduling Tester
 
 	positional arguments:
 	  input                 input file
@@ -31,11 +29,14 @@ Command Line
 	  -h, --help            show this help message and exit
 	  --algorithm ALGORITHM
 	                        chosen algorithm: cpr none
-	  --cores CORES         number of cores
+	  --cores CORES         number of cores for the scheduling
 	  --verbose
-	  --earliest            uses earliest instead of bottom for the MLS
-	  --usefloats
-	  --allunicore
+	  --earliest            uses earliest instead of bottom-level for the MLS
+	  --usefloats           compute using floats instead of fractions
+	  --allunicore          all tasks cannot be split
+	  --samezerocost        skip edge cost for same processor edges
+	  --transitive          transitive reduction (activates --samezerocost)
+	  --output OUTPUT       JSON output of scheduling
 
 
 References
