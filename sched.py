@@ -11,6 +11,7 @@ nodes start-time can be delayed without increasing the schedule length: http://c
 TODO: maybe static level = maximum path cost without the edge costs
 
 """
+import sys
 import heapq
 import fractions
 import argparse
@@ -397,6 +398,7 @@ if __name__ == "__main__":
     parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
     parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
     parser.add_argument('--transitive',action="store_true",help="transitive reduction with samezerocost")
+    parser.add_argument('--output',help="JSON output of scheduling")
 
     args = parser.parse_args()
 
@@ -429,9 +431,24 @@ if __name__ == "__main__":
             print p
         print e
         print "Total",float(r["T"])
+        if args.output:
+            # TODO store in the output flags for the synchronization
+            s = []
+            for p in r["schedule"]:
+                pp = []
+                for b,e,t in p.tasks:
+                    pp.append(dict(task=t.id,span=[float(b),float(e)],split=len(t.proc)))
+                s.append(pp)
+            j = dict(maxspan=float(r["T"]),schedule=s)
+            if args.output == "-":
+                fp = sys.stdout
+            else:
+                fp = open(args.output,"wb")
+            json.dump(j,fp,sort_keys=True,indent=4, separators=(',', ': '))
     elif args.algorithm == "none":
         print "Tasks",len(tasks)
         for t in tasks:
             print t
     else:
         print "unknown algorithm",args.algorithm
+
