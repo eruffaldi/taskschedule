@@ -61,6 +61,7 @@ class Proc:
         self.index = index # number of the processor
         self.tasks = []    # (start,end,task) for the ones to be executed
         self.next = 0      # last task completed == self.tasks[-1][1]
+        self.stasks = set() # task of which Proc contains all results
     def __repr__(self):
         if makenumbers == float:
             return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f]" % (t.id,s,e,) for s,e,t in self.tasks]))
@@ -182,11 +183,16 @@ def MLS(tasks,numCores,args):
                 # per p duration depends on the edge transferts
                 allinputcosts = 0
                 for x in t.parents: # for all parents of t
+                    if args.transitive and x.source in p.stasks:
+                        if args.verbose:
+                            print "transitive"
+                        continue
                     if p in x.source.proc: # for all the k processors in which it has been split, if they contain p we can skip 1/k data transfer
                         if len(x.source.proc) > 1: #
                             allinputcosts += x.cost*makenumbers(len(x.source.proc)-1)/makenumbers(len(x.source.proc)) # all except p
                     else:
                         allinputcosts += x.cost # full cost being outside
+                    p.stasks.add(x.source) # we are inglobating it for scheduling t
                 duration = allinputcosts + basecost
 
             # compute execution range
@@ -390,11 +396,15 @@ if __name__ == "__main__":
     parser.add_argument('--usefloats',action="store_true",help="compute using floats")
     parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
     parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
+    parser.add_argument('--transitive',action="store_true",help="transitive reduction with samezerocost")
 
     args = parser.parse_args()
 
     if args.usefloats:
         makenumbers = float
+
+    if args.transitive:
+        args.samezerocost = True
 
     if args.allunicore:
         defaultcore = 1

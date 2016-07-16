@@ -1,0 +1,8 @@
+digraph G {
+	A [cost=10];
+	A -> B [cost=10];
+	A -> D;
+	E -> C;
+	D -> C;
+	B -> C;
+}
