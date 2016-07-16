@@ -28,9 +28,9 @@ defaultcore = 0 # ALL
 class MTaskEdge:
     """Edge of a M-Task with edge cost"""
     def __init__(self,source,dest,cost):
-        self.source = source
-        self.dest = dest
-        self.cost = makenumbers(cost)
+        self.source = source # source MTask (parent of dest)
+        self.dest = dest     # destination MTask (child of source)
+        self.cost = makenumbers(cost)  # cost of the transfer
 
 class MTask:
     """M-Task"""
@@ -40,25 +40,27 @@ class MTask:
         self.maxnp = maxnp # maximu number of processors (0=all)
         self.cost = makenumbers(cost)     # cost values
 
-        # computed
+        # Computed FIXED propertirs
         self.sparents = set()  # tasks in parents
-        self.endtime = 0       # time of last proc running task
-        self.earlieststart = 0 # time of effectiv first start among tasks in proc
         self.children = []     # computed children
-        self.proc = set() # processors used
         self.top = 0        # t-level
         self.slevel = 0     # s-level (not counitng edge cost)
         self.bottom = 0     # b-level
-        self.Np = 0         # effective number of processor (request)
+
+        # Scheduling Results
+        self.endtime = 0       # time of last proc running task
+        self.earlieststart = 0 # time of effectiv first start among tasks in proc
+        self.proc = set() # processors used
+        self.Np = 0         # effective number of processor (request) == len(self.proc)
     def __repr__(self):
         return "MTask %s cost=%d top=%s bottom=%s slevel=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,[t.id for t in self.sparents],[t.dest.id for t in self.children])
 
 class Proc:
     """Processor allocation"""
     def __init__(self,index):
-        self.index = index
-        self.tasks = []
-        self.next = 0
+        self.index = index # number of the processor
+        self.tasks = []    # (start,end,task) for the ones to be executed
+        self.next = 0      # last task completed == self.tasks[-1][1]
     def __repr__(self):
         if makenumbers == float:
             return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f]" % (t.id,s,e,) for s,e,t in self.tasks]))
@@ -136,17 +138,23 @@ def MLS(tasks,numCores,args):
         if len(t.sparents) == 0:
             heapq.heappush(ready,(0,t)) # for entries the earliest==bottom==0
 
+    #Status of tasks:
+    #   needed = tasks to be scheduled
+    #   ready  = tasks ready to be schedule (parents OK)
+    #   running = in execution (used for tracking running DEPENDENCY)
+    #   done   = completed after running (used for DEPENDENCY)
+
     #print "!!starting with ready",len(ready),"and needed ",len(needed)
     while len(needed) > 0:        
-
         # if no more ready populate them picking from available in running
         while len(ready) == 0 and len(running) != 0:
             #print "need to fulfill some from running",len(running)
             # compute which is ready 
             justdonetime,justdone = heapq.heappop(running)
+            done.add(justdone)
             for e in justdone.children:
                 t = e.dest
-                if t.earlieststart is None and len(set(t.sparents)-done) == 0: # TODO: improve efficiency of this
+                if len(set(t.sparents)-done) == 0: # TODO: improve efficiency of this
                     t.earlieststart = justdonetime # minimum time for this due to this LAST parent
                     # TODO: should we add the input costs?
                     #print "adding",t.id,"earliest",justdonetime
@@ -158,7 +166,6 @@ def MLS(tasks,numCores,args):
         # get highest priority
         pri,t = heapq.heappop(ready)
         needed.remove(t)
-        done.add(t)
 
         # we cannot allocate due to the lack of available processors
         if t.Np > len(procpq):
@@ -170,7 +177,6 @@ def MLS(tasks,numCores,args):
         allinputcosts = sum([x.cost for x in t.parents])
         duration = allinputcosts + basecost
 
-        earlieststart = None
         for pnext,p in picked:
             if args.samezerocost:
                 # per p duration depends on the edge transferts
@@ -186,8 +192,6 @@ def MLS(tasks,numCores,args):
             # compute execution range
             tstart = max(pnext,t.earlieststart)
             tend = tstart + duration
-            if earlieststart is None:
-                earlieststart = tstart
             
             p.tasks.append((tstart,tend,t)) # tstart-pnext IS flexibility
             p.next = tend # marks next available
@@ -195,8 +199,8 @@ def MLS(tasks,numCores,args):
             t.proc.add(p)
             heapq.heappush(procpq,(p.next,p))
 
-        t.endtime = tend # the last will be the latest 
-        t.earlieststart = earlieststart
+        t.earlieststart = picked[0][1].tasks[-1][0]  # adjusted to reflect 
+        t.endtime = picked[-1][1].tasks[-1][1]  
 
         heapq.heappush(running,(t.endtime,t)) # tend is the end of the last proc for task t
 
@@ -369,17 +373,9 @@ def analyzeschedule(schedule,tasks):
     for t in tasks:
         for s in t.sparents:
             if t.earlieststart < s.endtime:
-                print "inversion for ",t.id," against ",s.id
-    # we have stored all the runs ordered by 
-    #while len(runs) > 0:
-    #    b,o = heapq.heappop(runs)
-    #    t,e,index = o
-    #    if args.verbose:
-    #        print "%s %s on %d of T %s" % (b,e,index,t.id)
-    #    for pa in t.sparents:
-    #        if pa.realend is None or pa.realend > b:
-    #            print "inversion error for T",t.id,"starts ",pa.id
-    #            errors += 1
+                print "inversion for ",t.id," starts ",t.earlieststart," against ",s.id," ends ",s.endtime
+                errors += 1
+
     return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors)
     
 if __name__ == "__main__":
