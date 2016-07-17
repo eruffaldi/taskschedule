@@ -20,6 +20,10 @@ from collections import OrderedDict
 from functools import reduce as _reduce
 import json
 
+def forall(u,op):
+    for x in u:
+        op(x)
+
 # global for controlling computation in fraction vs float
 makenumbers = fractions.Fraction
 # global for controlling number of cores (0=max)
@@ -120,6 +124,18 @@ def toposorttasks(data,sort=True):
     # back from id tho objects list
     return [qd[i] for i in toposort_flatten(q,sort=sort)]
 
+def recomputetaskproc(schedule,tasks):
+    #forall(tasks,lambda x: [None for x.proc in [set()]])
+    for t in tasks:
+        t.proc = set()
+    for p in schedule:
+        for b,e,t in p.tasks:
+            t.proc.add((b,e,p))
+    for t in tasks:
+        t.Np = len(t.proc)
+        t.earlieststart = min([b for b,e,p in t.proc])
+        t.endtime = max([b for b,e,p in t.proc])
+
 def MLS(tasks,numCores,args):
     """Computes MLS"""
     proco = [Proc(i) for i in range(1,numCores+1)]
@@ -192,7 +208,7 @@ def MLS(tasks,numCores,args):
             # EXPERIMENTAL aggregator for special case of affinity
             picked = None
             if t.maxnp == 1 and len(t.parents) == 1 and len(t.parents[0].source.proc) == 1:
-                tproc = list(t.parents[0].source.proc)[0]            
+                tproc = list(t.parents[0].source.proc)[0][0]            
                 if tproc.next <= t.earlieststart:
                     ppo = []
                     while len(procpq) > 0:
@@ -240,7 +256,7 @@ def MLS(tasks,numCores,args):
             p.tasks.append((tstart,tend,t)) # tstart-pnext IS flexibility
             p.next = tend # marks next available
 
-            t.proc.add(p)
+            t.proc.add((tstart,tend,p))
             heapq.heappush(procpq,(p.next,p))
 
         t.earlieststart = picked[0][1].tasks[-1][0]  # adjusted to reflect 
@@ -283,6 +299,7 @@ def cpr(tasks,numCores,args):
                 else:
                     t.Np -= 1
                     del chi[index]
+    recomputetaskproc(ta,tasks)
     return dict(schedule=ta,T=T)
 
 def updatepriorities(schedule,tasks):
