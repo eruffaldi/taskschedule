@@ -172,8 +172,45 @@ def MLS(tasks,numCores,args):
         # we cannot allocate due to the lack of available processors
         if t.Np > len(procpq):
             return 1e100,[]
-        picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
-        
+
+
+        if False:
+            # EXPERIMENTAL for improving affinity
+            if False:
+                procpqq = procpq[:]
+                print "-"
+                while len(procpqq) > 0:
+                    a,b = heapq.heappop(procpqq)
+                    print a,b.index
+
+                # we have: earlieststart that dominates over p.next
+                # let's compute the parents
+                parentproc = set()
+                for pt in t.parents:
+                    parentproc |= pt.source.proc
+
+            # EXPERIMENTAL aggregator for special case of affinity
+            picked = None
+            if t.maxnp == 1 and len(t.parents) == 1 and len(t.parents[0].source.proc) == 1:
+                tproc = list(t.parents[0].source.proc)[0]            
+                if tproc.next <= t.earlieststart:
+                    ppo = []
+                    while len(procpq) > 0:
+                        pi = heapq.heappop(procpq) 
+                        print pi[0],pi[1].index,tproc.index
+                        if pi[1] == tproc:
+                            picked = [(tproc.next,tproc)]
+                            break
+                        else:
+                            ppo.append(pi)
+                    # restore
+                    for p in ppo:
+                        heapq.heappush(procpq,p)
+            if picked is None:
+                picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
+        else:
+            picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
+
         # split cost due to parallelims, precompute all input transfers
         basecost = t.cost/makenumbers(len(picked))
         allinputcosts = sum([x.cost for x in t.parents])
@@ -360,6 +397,57 @@ def loadtasksdot(fp):
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
 
+def drawsched(name,schedule,tasks):
+    # draw the make span horizontally (#proc < #tasks)
+    import cairo
+    maxspan = max([x.next for x in schedule])
+    nproc = len(schedule)
+    minspan = min([min([e-b for b,e,t in p.tasks]) for p in schedule])
+    maxtext = max([max([len(str(t.id)) for b,e,t in p.tasks]) for p in schedule])
+    pheight = 20
+    pymargin = 2
+    pxmargin = 2
+    fontsize = 12
+    height = (pheight+pymargin)*(nproc+1)
+    # minimum (for text) should be 50 pixels
+    timescale = (maxtext*fontsize+20)/minspan
+    width = int(maxspan*timescale+pxmargin*2)
+
+    svgmode = name.endswith(".svg")
+    if svgmode:
+        surface = cairo.SVGSurface (name,width, height)
+    else:
+        surface = cairo.ImageSurface (cairo.FORMAT_ARGB32, width, height)
+    cr = cairo.Context (surface)
+    #ctx.scale (WIDTH, HEIGHT) # Normalizing the canvas
+
+    cr.set_line_width(pxmargin)
+    cr.select_font_face("Georgia", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    cr.set_font_size(fontsize)
+    #(x, y, w, h, dx, dy) = cr.text_extents(maxtext*"O")
+    #print w
+
+    py = pheight/2
+    for p in schedule:
+        for b,e,t in p.tasks:
+            durwidth = (e-b)*timescale
+            durwidth -= pxmargin
+            bx = b*timescale+pxmargin
+            cr.rectangle(bx, py, durwidth, pheight)
+            cr.set_source_rgb(0, 0, 0)
+            cr.stroke_preserve()
+            cr.set_source_rgb(255, 255, 255)
+            cr.fill()
+            cr.set_source_rgb(0, 0, 0)
+            s = str(t.id)
+            (x, y, w, h, dx, dy) = cr.text_extents(s)
+            cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
+            cr.show_text(s)
+        py += pheight+pymargin
+    if not svgmode:
+        surface.write_to_png (name) # Output to PNG
+
+
 
 def analyzeschedule(schedule,tasks):
     """Analyzes Schedule for Errors"""
@@ -399,6 +487,8 @@ if __name__ == "__main__":
     parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
     parser.add_argument('--transitive',action="store_true",help="transitive reduction (activates --samezerocost)")
     parser.add_argument('--output',help="JSON output of scheduling")
+    parser.add_argument('--savepng',help="emit PNG")
+    parser.add_argument('--savesvg',help="emit SVG")
 
     args = parser.parse_args()
 
@@ -445,6 +535,8 @@ if __name__ == "__main__":
             else:
                 fp = open(args.output,"wb")
             json.dump(j,fp,sort_keys=True,indent=4, separators=(',', ': '))
+        if args.savepng or args.savesvg:
+            drawsched(args.savepng or args.savesvg,r["schedule"],tasks)
     elif args.algorithm == "none":
         print "Tasks",len(tasks)
         for t in tasks:
