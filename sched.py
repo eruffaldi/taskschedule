@@ -134,7 +134,7 @@ def recomputetaskproc(schedule,tasks):
     for t in tasks:
         t.Np = len(t.proc)
         t.earlieststart = min([b for b,e,p in t.proc])
-        t.endtime = max([b for b,e,p in t.proc])
+        t.endtime = max([e for b,e,p in t.proc])
 
 def MLS(tasks,numCores,args):
     """Computes MLS"""
