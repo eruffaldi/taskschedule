@@ -19,6 +19,7 @@ import operator
 from collections import OrderedDict
 from functools import reduce as _reduce
 import json
+import operator
 
 def forall(u,op):
     for x in u:
@@ -460,6 +461,24 @@ def drawsched(name,schedule,tasks):
             (x, y, w, h, dx, dy) = cr.text_extents(s)
             cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
             cr.show_text(s)
+            # we need the proc not all the tuple
+            allp = _reduce(operator.or_,[set([pp[2] for pp in x.source.proc]) for x in t.parents],set())
+
+            if len(allp) == 0 or (len(allp) == 1 and p == list(allp)[0]):
+                mode = 1
+            elif len(allp) == 1:
+                mode = 2
+                c = (255,255,0)
+            else:
+                mode = 3
+                c = (255,0,0)
+            if mode > 1:
+                cr.rectangle(bx, py+pheight/2-pheight/8.0, pheight/4.0,pheight/4.0)
+                cr.set_source_rgb(0, 0, 0)
+                cr.stroke_preserve()
+                cr.set_source_rgb(*c)
+                cr.fill()
+
         py += pheight+pymargin
     if not svgmode:
         surface.write_to_png (name) # Output to PNG
