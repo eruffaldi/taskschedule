@@ -43,8 +43,8 @@ class MTask:
     def __init__(self,id,cost,maxnp):
         self.id = id       # identifier
         self.parents = [] # inputs as MTaskEdge
-        self.maxnp = maxnp # maximu number of processors (0=all)
-        self.cost = makenumbers(cost)     # cost values
+        self.maxnp = maxnp # maximu number of processors (0=all means infinitely splittable!)
+        self.cost = makenumbers(cost)     # cost values (should be evenly divisible by maxnp if maxnp is not null)
 
         # Computed FIXED propertirs
         self.sparents = set()  # tasks in parents
@@ -61,6 +61,14 @@ class MTask:
     def __repr__(self):
         return "MTask %s cost=%d top=%s bottom=%s slevel=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,[t.id for t in self.sparents],[t.dest.id for t in self.children])
 
+# use of task by Processor, it was (s,e,t) but we need also slicing
+class ProcTask:
+    def __init__(self,proc,task,start,end):
+        self.proc = proc
+        self.task = task
+        self.start = start
+        self.end = end
+        self.rangesplit = None # (istart,iend)
 class Proc:
     """Processor allocation"""
     def __init__(self,index):
@@ -70,9 +78,9 @@ class Proc:
         self.stasks = set() # task of which Proc contains all results
     def __repr__(self):
         if makenumbers == float:
-            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f]" % (t.id,s,e,) for s,e,t in self.tasks]))
+            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f]" % (q.task.id,q.begin,q.end) for q in self.tasks]))
         else:
-            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (t.id,s,e,) for s,e,t in self.tasks]))
+            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (q.task.id,q.begin,q.end) for q in self.tasks]))
 
 
 # Taken from: https://pypi.python.org/pypi/toposort/1.0
@@ -130,12 +138,13 @@ def recomputetaskproc(schedule,tasks):
     for t in tasks:
         t.proc = set()
     for p in schedule:
-        for b,e,t in p.tasks:
-            t.proc.add((b,e,p))
+        for q in p.tasks:
+            t.proc.add(q)
     for t in tasks:
         t.Np = len(t.proc)
-        t.earlieststart = min([b for b,e,p in t.proc])
-        t.endtime = max([e for b,e,p in t.proc])
+        t.earlieststart = min([q.begin for q in t.proc])
+        t.endtime = max([q.end for q in t.proc])
+        # TODO compute
 
 def MLS(tasks,numCores,args):
     """Computes MLS"""
@@ -209,7 +218,7 @@ def MLS(tasks,numCores,args):
             # EXPERIMENTAL aggregator for special case of affinity
             picked = None
             if t.maxnp == 1 and len(t.parents) == 1 and len(t.parents[0].source.proc) == 1:
-                tproc = list(t.parents[0].source.proc)[0][0]            
+                tproc = list(t.parents[0].source.proc)[0].proc
                 if tproc.next <= t.earlieststart:
                     ppo = []
                     while len(procpq) > 0:
@@ -254,14 +263,15 @@ def MLS(tasks,numCores,args):
             tstart = max(pnext,t.earlieststart)
             tend = tstart + duration
             
-            p.tasks.append((tstart,tend,t)) # tstart-pnext IS flexibility
+            q = ProcTask(p,t,tstart,tend)
+            p.tasks.append(q) # tstart-pnext IS flexibility
             p.next = tend # marks next available
 
-            t.proc.add((tstart,tend,p))
+            t.proc.add(q)
             heapq.heappush(procpq,(p.next,p))
 
-        t.earlieststart = picked[0][1].tasks[-1][0]  # adjusted to reflect 
-        t.endtime = picked[-1][1].tasks[-1][1]  
+        t.earlieststart = picked[0][1].tasks[-1].begin  # adjusted to reflect 
+        t.endtime = picked[-1][1].tasks[-1].end
 
         heapq.heappush(running,(t.endtime,t)) # tend is the end of the last proc for task t
 
@@ -420,8 +430,8 @@ def drawsched(name,schedule,tasks):
     import cairo
     maxspan = max([x.next for x in schedule])
     nproc = len(schedule)
-    minspan = min([min([e-b for b,e,t in p.tasks]) for p in schedule])
-    maxtext = max([max([len(str(t.id)) for b,e,t in p.tasks]) for p in schedule])
+    minspan = min([min([q.end-q.begin for q in p.tasks]) for p in schedule])
+    maxtext = max([max([len(str(q.task.id)) for q in p.tasks]) for p in schedule])
     pheight = 20
     pymargin = 2
     pxmargin = 2
@@ -447,7 +457,10 @@ def drawsched(name,schedule,tasks):
 
     py = pheight/2
     for p in schedule:
-        for b,e,t in p.tasks:
+        for q in p.tasks:
+            e = q.end
+            b = q.begin
+            t = q.task
             durwidth = (e-b)*timescale
             durwidth -= pxmargin
             bx = b*timescale+pxmargin
@@ -462,7 +475,7 @@ def drawsched(name,schedule,tasks):
             cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
             cr.show_text(s)
             # we need the proc not all the tuple
-            allp = _reduce(operator.or_,[set([pp[2] for pp in x.source.proc]) for x in t.parents],set())
+            allp = _reduce(operator.or_,[set([q.proc for q in x.source.proc]) for x in t.parents],set())
 
             if len(allp) == 0 or (len(allp) == 1 and p == list(allp)[0]):
                 mode = 1
@@ -493,9 +506,9 @@ def analyzeschedule(schedule,tasks):
     for p in schedule:
         last = 0
         slacks = []
-        for b,e,t in p.tasks:
-            slacks.append(b-last)
-            last = e
+        for q in p.tasks:
+            slacks.append(q.begin-last)
+            last = q.end
             #heapq.heappush(runs,(b,(t,e,p.index)))
         if len(slacks) == 0: # unused
             continue
@@ -508,7 +521,20 @@ def analyzeschedule(schedule,tasks):
                 errors += 1
 
     return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors)
-    
+
+def loadsched(f):
+    pass
+
+def loadtasks(f):
+    if f.endswith(".json"):
+        tasks = loadtasksjson(open(f,"rb"))
+    else:
+        tasks = loadtasksdot(open(f,"rb"))
+    tasks = toposorttasks(tasks)
+    # update structures and compute 
+    annotatetasks(tasks)
+    return tasks
+
 if __name__ == "__main__":
 
     import argparse
@@ -525,6 +551,7 @@ if __name__ == "__main__":
     parser.add_argument('--output',help="JSON output of scheduling")
     parser.add_argument('--savepng',help="emit PNG")
     parser.add_argument('--savesvg',help="emit SVG")
+    parser.add_argument('--saverun',help="emit RUN for taskrunner")
 
     args = parser.parse_args()
 
@@ -562,8 +589,8 @@ if __name__ == "__main__":
             s = []
             for p in r["schedule"]:
                 pp = []
-                for b,e,t in p.tasks:
-                    pp.append(dict(task=t.id,span=[float(b),float(e)],split=len(t.proc)))
+                for q in p.tasks:
+                    pp.append(dict(task=q.task.id,span=[float(q.begin),float(q.end)],split=len(q.task.proc)))
                 s.append(pp)
             j = dict(maxspan=float(r["T"]),schedule=s)
             if args.output == "-":
@@ -573,6 +600,11 @@ if __name__ == "__main__":
             json.dump(j,fp,sort_keys=True,indent=4, separators=(',', ': '))
         if args.savepng or args.savesvg:
             drawsched(args.savepng or args.savesvg,r["schedule"],tasks)
+        if args.saverun:
+            import sched2run
+            oo = sched2run.sched2run(r["schedule"],r["tasks"])
+            open(args.saverun,"wb").write("\n".join([" ".join(y) for y in oo]))
+
     elif args.algorithm == "none":
         print "Tasks",len(tasks)
         for t in tasks:
