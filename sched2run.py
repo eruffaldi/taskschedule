@@ -75,7 +75,7 @@ def sched2run(schedule,tasks):
 			needed = False
 			# check if all parents are single-proc in the same proc of this
 			for tp in t.parents:
-				if len(tp.proc) > 1 or list(tp.proc)[0].proc != thisproc:
+				if len(tp.source.proc) > 1 or list(tp.source.proc)[0].proc != thisproc:
 					needed = True 
 		else:
 			needed = True
