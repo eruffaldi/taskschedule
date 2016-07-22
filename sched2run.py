@@ -106,12 +106,13 @@ def sched2run(schedule,tasks):
 		osched.append(ss)					
 
 	# add closings semaphore: emitted by each proc 1..n, wait by main
-	if len(schedule) > 1:
-		si = len(sems)
-		sems.append(len(schedule)-1)
-		for i in range(1,len(schedule)):
-			osched[i].append(makeNOTIFY(i,si))
-		osched[0].append(makeWAIT(0,si))
+	if False: # joint does this
+		if len(schedule) > 1:
+			si = len(sems)
+			sems.append(len(schedule)-1)
+			for i in range(1,len(schedule)):
+				osched[i].append(makeNOTIFY(i,si))
+			osched[0].append(makeWAIT(0,si))
 
 	# out semaphores
 	o.append(makeSEMAPHORES(len(sems)))
