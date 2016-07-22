@@ -1,4 +1,4 @@
-import sched
+import sched,math
 
 def enum(*sequential, **named):
     enums = dict(zip(sequential, range(len(sequential))), **named)
@@ -24,7 +24,7 @@ def makeSEMAPHORES(n):
 	return [Actions.NUMSEMAPHORES,0,0,n,0]
 
 def makeACTIONS(tid,n):
-	return [Actions.ACTIONS,tid,0,n,0]
+	return [Actions.NUMACTIONS,tid,0,n,0]
 
 def makeSEMAPHORE(sid,n):
 	return [Actions.SEMAPHORE,0,sid,n,0]
@@ -67,51 +67,51 @@ def sched2run(schedule,tasks):
 	osched = []
 	tasksem = {}
 
-	# compute semaphore of tasks
+	# compute semaphore of tasks by checking for AFFINITY
 	for t in tasks:
-		if len(t.procs) == 1:
-			thisproc = list(t.procs)[0].proc
+		if len(t.proc) == 1:
+			thisproc = list(t.proc)[0].proc
 			# assume no need
 			needed = False
 			# check if all parents are single-proc in the same proc of this
 			for tp in t.parents:
-				if len(tp.procs) > 1 or list(tp.procs)[0].proc != thisproc:
+				if len(tp.proc) > 1 or list(tp.proc)[0].proc != thisproc:
 					needed = True 
 		else:
 			needed = True
 		if needed:
 			si = len(sems)
-			sems.append(len(t.procs))
+			sems.append(len(t.proc))
 			tasksem[t.id] = si
 
-	for p in schedule:
+	for index,p in enumerate(schedule):
 		ss = []
 		for q in p.tasks:
 			t = q.task
 			# wait for ANY parent if they have an associated semaphore
 			for pt in t.parents:
-				si = tasksem.get(pt.id)
+				si = tasksem.get(pt.source.id)
 				if si is not None:
-					ss.append(makeWAIT(si))
+					ss.append(makeWAIT(index,si))
 
-			if len(t.procs) == 1: # single
-				ss.append(makeRUNTASK(p.index,taskid2id[t.id]))				
+			if len(t.proc) == 1: # single
+				ss.append(makeRUNTASK(index,taskid2id[t.id]))				
 			else: # par
-				ss.append(makeRUNTASKPAR(p.index,taskid2id[t.id],q.first,q.last))
+				ss.append(makeRUNTASKPAR(index,taskid2id[t.id],q.rangesplit[0],q.rangesplit[1]))
 
 			# notify if needed by THIS task instance
 			si = tasksem.get(t.id)
 			if si is not None:
-				ss.append(makeNOTIFY(si))
+				ss.append(makeNOTIFY(index,si))
 		osched.append(ss)					
 
-	# add closings semaphore
+	# add closings semaphore: emitted by each proc 1..n, wait by main
 	if len(schedule) > 1:
 		si = len(sems)
 		sems.append(len(schedule)-1)
 		for i in range(1,len(schedule)):
-			osched[i].append(makeNOTIFY(si))
-		osched[0].append(makeWAIT(si))
+			osched[i].append(makeNOTIFY(i,si))
+		osched[0].append(makeWAIT(0,si))
 
 	# out semaphores
 	o.append(makeSEMAPHORES(len(sems)))

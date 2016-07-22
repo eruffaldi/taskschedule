@@ -11,7 +11,7 @@ nodes start-time can be delayed without increasing the schedule length: http://c
 TODO: maybe static level = maximum path cost without the edge costs
 
 """
-import sys
+import sys,math
 import heapq
 import fractions
 import argparse
@@ -59,14 +59,14 @@ class MTask:
         self.proc = set() # processors used
         self.Np = 0         # effective number of processor (request) == len(self.proc)
     def __repr__(self):
-        return "MTask %s cost=%d top=%s bottom=%s slevel=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,[t.id for t in self.sparents],[t.dest.id for t in self.children])
+        return "MTask %s cost=%d top=%s bottom=%s slevel=%d maxnp=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,self.maxnp,[t.id for t in self.sparents],[t.dest.id for t in self.children])
 
 # use of task by Processor, it was (s,e,t) but we need also slicing
 class ProcTask:
-    def __init__(self,proc,task,start,end):
+    def __init__(self,proc,task,begin,end):
         self.proc = proc
         self.task = task
-        self.start = start
+        self.begin = begin
         self.end = end
         self.rangesplit = None # (istart,iend)
 class Proc:
@@ -78,9 +78,9 @@ class Proc:
         self.stasks = set() # task of which Proc contains all results
     def __repr__(self):
         if makenumbers == float:
-            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f]" % (q.task.id,q.begin,q.end) for q in self.tasks]))
+            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f, %d-%d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1]) for q in self.tasks]))
         else:
-            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s]" % (q.task.id,q.begin,q.end) for q in self.tasks]))
+            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s, %d-%d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1]) for q in self.tasks]))
 
 
 # Taken from: https://pypi.python.org/pypi/toposort/1.0
@@ -134,17 +134,42 @@ def toposorttasks(data,sort=True):
     return [qd[i] for i in toposort_flatten(q,sort=sort)]
 
 def recomputetaskproc(schedule,tasks):
-    #forall(tasks,lambda x: [None for x.proc in [set()]])
+    """Recomputes some values per-task after the approval of a schedule"""
+    # first build the correct list of ProcTask per task
     for t in tasks:
         t.proc = set()
     for p in schedule:
         for q in p.tasks:
-            t.proc.add(q)
+            q.task.proc.add(q)
+
+    # then update the activation times and distribute the slices in the case of paralle tasks
     for t in tasks:
         t.Np = len(t.proc)
-        t.earlieststart = min([q.begin for q in t.proc])
-        t.endtime = max([q.end for q in t.proc])
-        # TODO compute
+        if t.Np == 0:
+            # strange no allocation
+            t.earlieststart = 0
+            t.endtime = 0
+        else:
+            t.earlieststart = min([q.begin for q in t.proc])
+            t.endtime = max([q.end for q in t.proc])
+            if t.Np == 1:
+                # just one for all
+                list(t.proc)[0].rangesplit = (0,t.maxnp)
+            elif t.maxnp > 0:
+                # we have a boundex task so we can split it
+                k = int(math.ceil(t.maxnp/t.Np))
+                z = list(t.proc)
+                i0 = 0
+                for i in range(0,len(t.proc)):
+                    z[i].rangesplit = (i0,i0+k)
+                    i0 += k
+                # NOTE: with k we overstimate, so we could have some excess in the last. We do not take this into account
+                z[-1].rangesplit = (z[-1].rangesplit[0],t.maxnp)
+            else:
+                # unbounded paralle tasks assign 1 slot to every processor
+                z = list(t.proc)
+                for i in range(0,len(t.proc)):
+                    z[i].rangesplit = (i,i)
 
 def MLS(tasks,numCores,args):
     """Computes MLS"""
@@ -515,6 +540,8 @@ def analyzeschedule(schedule,tasks):
         avgs.append(sum(slacks)/len(slacks))
 
     for t in tasks:
+        if len(t.proc) == 0:
+            print "not computed",t.id
         for s in t.sparents:
             if t.earlieststart < s.endtime:
                 print "inversion for ",t.id," starts ",t.earlieststart," against ",s.id," ends ",s.endtime
@@ -579,6 +606,7 @@ if __name__ == "__main__":
             print t
     if args.algorithm == "cpr":
         r = cpr(tasks,args.cores,args)  
+        r["tasks"] = tasks
         e = analyzeschedule(r["schedule"],tasks)
         for p in r["schedule"]:
             print p
@@ -603,7 +631,7 @@ if __name__ == "__main__":
         if args.saverun:
             import sched2run
             oo = sched2run.sched2run(r["schedule"],r["tasks"])
-            open(args.saverun,"wb").write("\n".join([" ".join(y) for y in oo]))
+            open(args.saverun,"wb").write("\n".join([" ".join([str(z) for z in y]) for y in oo]))
 
     elif args.algorithm == "none":
         print "Tasks",len(tasks)

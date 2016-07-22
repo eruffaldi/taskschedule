@@ -1,5 +1,5 @@
 digraph G {
-	A [cost=10];
+	A [cost=10,maxnp=16];
 	A -> B [cost=10];
 	E -> C;
 	B -> C;
