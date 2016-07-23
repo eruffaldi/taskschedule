@@ -500,14 +500,18 @@ def drawsched(name,schedule,tasks):
             (x, y, w, h, dx, dy) = cr.text_extents(s)
             cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
             cr.show_text(s)
-            # we need the proc not all the tuple
+            # all processors to be waited except this processor
             allp = _reduce(operator.or_,[set([q.proc for q in x.source.proc]) for x in t.parents],set())
+            allp = allp - set([p])
 
-            if len(allp) == 0 or (len(allp) == 1 and p == list(allp)[0]):
+            # nothing to be wait for
+            if len(allp) == 0:
                 mode = 1
+            # one single semafore
             elif len(allp) == 1:
                 mode = 2
                 c = (255,255,0)
+            # more than one
             else:
                 mode = 3
                 c = (255,0,0)
