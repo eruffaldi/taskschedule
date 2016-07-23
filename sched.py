@@ -175,8 +175,9 @@ def MLS(tasks,numCores,args):
     """Computes MLS"""
     proco = [Proc(i) for i in range(1,numCores+1)]
     procpq = []
-    for p in proco:
-        heapq.heappush(procpq,(0,p))
+    if args.nextproc:
+        for p in proco:
+            heapq.heappush(procpq,(0,p))
 
     ready = [] # list
     needed = set(tasks) # all needed
@@ -220,52 +221,48 @@ def MLS(tasks,numCores,args):
         pri,t = heapq.heappop(ready)
         needed.remove(t)
 
-        # we cannot allocate due to the lack of available processors
-        if t.Np > len(procpq):
-            return 1e100,[]
 
-
-        if False:
-            # EXPERIMENTAL for improving affinity
-            if False:
-                procpqq = procpq[:]
-                print "-"
-                while len(procpqq) > 0:
-                    a,b = heapq.heappop(procpqq)
-                    print a,b.index
-
-                # we have: earlieststart that dominates over p.next
-                # let's compute the parents
-                parentproc = set()
-                for pt in t.parents:
-                    parentproc |= pt.source.proc
-
-            # EXPERIMENTAL aggregator for special case of affinity
-            picked = None
-            if t.maxnp == 1 and len(t.parents) == 1 and len(t.parents[0].source.proc) == 1:
-                tproc = list(t.parents[0].source.proc)[0].proc
-                if tproc.next <= t.earlieststart:
-                    ppo = []
-                    while len(procpq) > 0:
-                        pi = heapq.heappop(procpq) 
-                        print pi[0],pi[1].index,tproc.index
-                        if pi[1] == tproc:
-                            picked = [(tproc.next,tproc)]
-                            break
-                        else:
-                            ppo.append(pi)
-                    # restore
-                    for p in ppo:
-                        heapq.heappush(procpq,p)
-            if picked is None:
-                picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
-        else:
-            picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
-
+        # We should pick all the Np processors p that satisfy the following
+        #   next[p] + cost[t,p] + sum([cost[ta,t,proc[ta],p] for ta in parents[t]])
+        #
+        #   note: if proc[ta] > 1 we can take max or mean
+        #
+        # The above formulation is in the line of heterogeneous systems, and also deals with affinity: cost[ta,t,p,p] = 0
+        # In the classic formulation we simply order by: next[p]
+        #
+        # We would like also to 
         # split cost due to parallelims, precompute all input transfers
-        basecost = t.cost/makenumbers(len(picked))
-        allinputcosts = sum([x.cost for x in t.parents])
-        duration = allinputcosts + basecost
+        basecost = t.cost/makenumbers(t.Np)
+
+        if args.nextproc:
+            # we cannot allocate due to the lack of available processors
+            if t.Np > len(procpq):
+                return 1e100,[]
+            picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
+        else:
+            if t.Np > len(proco):
+                return 1e100,[]
+            allp = []
+            # compute the end-time of the choice
+            for p in proco:
+                # for heterogeneouse modify this with cost[t,p]
+                ee = max(p.next,t.earlieststart) + basecost
+                for x in t.parents:
+                    if args.transitive and x.source in p.stasks:
+                        continue # result already transferred
+                    else:
+                        n = makenumbers(len(x.source.proc))
+                        # for heterogeneouse modify this with cost[ta.source,t,ta.proc,p]
+                        if args.samezerocost and p in x.source.proc:
+                            ee += x.cost*(n-1)/n
+                        else:
+                            ee += x.cost
+                allp.append((ee,p))
+            allp.sort(key=lambda x: x[0])
+            picked = allp[0:t.Np]
+
+        # we load the transfer cost into the RECEIVER and we DON'T charge the SENDER
+        allinputcosts0 = sum([x.cost for x in t.parents])
 
         for pnext,p in picked:
             if args.samezerocost:
@@ -277,23 +274,27 @@ def MLS(tasks,numCores,args):
                             print "transitive"
                         continue
                     if p in x.source.proc: # for all the k processors in which it has been split, if they contain p we can skip 1/k data transfer
-                        if len(x.source.proc) > 1: #
-                            allinputcosts += x.cost*makenumbers(len(x.source.proc)-1)/makenumbers(len(x.source.proc)) # all except p
+                        n = makenumbers(len(x.source.proc))
+                        allinputcosts += x.cost*(n-1)/n
                     else:
                         allinputcosts += x.cost # full cost being outside
                     p.stasks.add(x.source) # we are inglobating it for scheduling t
                 duration = allinputcosts + basecost
+            else:
+                duration = allinputcosts0 + basecost
 
             # compute execution range
-            tstart = max(pnext,t.earlieststart)
+            tstart = max(p.next,t.earlieststart)
             tend = tstart + duration
             
+            # create allocation
             q = ProcTask(p,t,tstart,tend)
-            p.tasks.append(q) # tstart-pnext IS flexibility
+            p.tasks.append(q) # tstart-p.next IS flexibility
             p.next = tend # marks next available
-
             t.proc.add(q)
-            heapq.heappush(procpq,(p.next,p))
+
+            if args.nextproc:
+                heapq.heappush(procpq,(p.next,p))
 
         t.earlieststart = picked[0][1].tasks[-1].begin  # adjusted to reflect 
         t.endtime = picked[-1][1].tasks[-1].end
@@ -575,6 +576,7 @@ if __name__ == "__main__":
     parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
     parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
     parser.add_argument('--transitive',action="store_true",help="transitive reduction (activates --samezerocost)")
+    parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
     parser.add_argument('--output',help="JSON output of scheduling")
     parser.add_argument('--savepng',help="emit PNG")
     parser.add_argument('--savesvg',help="emit SVG")
