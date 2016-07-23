@@ -68,7 +68,7 @@ class ProcTask:
         self.task = task
         self.begin = begin
         self.end = end
-        self.rangesplit = None # (istart,iend)
+        self.rangesplit = (0,0) # (istart,iend)
 class Proc:
     """Processor allocation"""
     def __init__(self,index):
@@ -244,22 +244,37 @@ def MLS(tasks,numCores,args):
                 return 1e100,[]
             allp = []
             # compute the end-time of the choice
+            optionminimizedeps = True # given same cost optimize for minimize affinity
             for p in proco:
                 # for heterogeneouse modify this with cost[t,p]
                 ee = max(p.next,t.earlieststart) + basecost
+                if optionminimizedeps:
+                    epp = set()
                 for x in t.parents:
                     if args.transitive and x.source in p.stasks:
                         continue # result already transferred
                     else:
                         n = makenumbers(len(x.source.proc))
+                        pap = set([q.proc for q in x.source.proc])
                         # for heterogeneouse modify this with cost[ta.source,t,ta.proc,p]
-                        if args.samezerocost and p in x.source.proc:
-                            ee += x.cost*(n-1)/n
+                        if args.samezerocost and p in pap:
+                            ee += x.cost*((n-1)/n)
                         else:
                             ee += x.cost
-                allp.append((ee,p))
-            allp.sort(key=lambda x: x[0])
-            picked = allp[0:t.Np]
+                        if optionminimizedeps:
+                            epp = epp | pap
+                if optionminimizedeps:
+                    if p in epp:
+                        epp.remove(p)
+                    allp.append((ee,p,len(epp)))
+                else:
+                    allp.append((ee,p))
+            if optionminimizedeps:
+                allp.sort(key=lambda x: (x[0],x[2]))
+                picked = [x[0:2] for x in allp[0:t.Np]]
+            else:
+                allp.sort(key=lambda x: x[0])
+                picked = allp[0:t.Np]
 
         # we load the transfer cost into the RECEIVER and we DON'T charge the SENDER
         allinputcosts0 = sum([x.cost for x in t.parents])
