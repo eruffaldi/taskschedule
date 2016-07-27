@@ -17,8 +17,8 @@ Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKP
 #NOTIFY id=sem
 #SLEEP not used
 
-def makeTHREADS(n):
-	return [Actions.NUMTHREADS,0,0,n,0]
+def makeTHREADS(n,implicitjoin=0):
+	return [Actions.NUMTHREADS,0,0,n,implicitjoin]
 
 def makeSEMAPHORES(n):
 	return [Actions.NUMSEMAPHORES,0,0,n,0]
@@ -46,8 +46,9 @@ def makeSLEEP(tid,tms):
 
 
 def sched2run(schedule,tasks):
+	implicitjoint = 0
 	o = []
-	o.append(makeTHREADS(len(schedule)))
+	o.append(makeTHREADS(len(schedule),implicitjoint))
 
 	#map task id to numbers: first all integers
 	taskid2id = dict()
@@ -106,8 +107,7 @@ def sched2run(schedule,tasks):
 		osched.append(ss)					
 
 	# add closings semaphore: emitted by each proc 1..n, wait by main
-	if False: # joint does this
-		if len(schedule) > 1:
+	if implicitjoint != 0 and len(schedule) > 1:
 			si = len(sems)
 			sems.append(len(schedule)-1)
 			for i in range(1,len(schedule)):
