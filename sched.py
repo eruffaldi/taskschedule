@@ -30,7 +30,6 @@ def forall(u,op):
 makenumbers = fractions.Fraction
 # global for controlling number of cores (0=max)
 defaultcore = 0 # ALL
-
 class MTaskEdge:
     """Edge of a M-Task with edge cost"""
     def __init__(self,source,dest,cost):
@@ -39,19 +38,14 @@ class MTaskEdge:
         self.cost = makenumbers(cost)  # cost of the transfer
 
 class MTask:
+    deadlinemaxtime = 10000000
     """M-Task"""
-    def __init__(self,id,cost,maxnp,deadline=None):
+    def __init__(self,id,cost,maxnp,deadline=deadlinemaxtime):
         self.id = id       # identifier
         self.parents = [] # inputs as MTaskEdge
         self.maxnp = maxnp # maximu number of processors (0=all means infinitely splittable!)
         self.cost = makenumbers(cost)     # cost values (should be evenly divisible by maxnp if maxnp is not null)
-        if deadline is not None:
-            if deadline == 0:
-                self.deadline = None
-            else:
-                self.deadline = makenumbers(deadline)
-        else:
-            self.deadline = deadline
+        self.deadline = makenumbers(deadline)
 
         # Computed FIXED propertirs
         self.sparents = set()  # tasks in parents
@@ -332,7 +326,7 @@ def MLS(tasks,numCores,args):
         t.endtime = picked[-1][1].tasks[-1].end
 
         # fail
-        if t.deadline is not None and t.lateststart > t.deadline:
+        if t.deadline < MTask.deadlinemaxtime and t.lateststart > t.deadline:
             return None,[]
 
         heapq.heappush(running,(t.endtime,t)) # tend is the end of the last proc for task t
@@ -401,7 +395,7 @@ def updatepriorities(schedule,tasks):
             t.bottom = max([p.dest.bottom + p.cost for p in t.children])+t.ucost
             t.slevel = max([p.dest.slevel  for p in t.children])+t.ucost            
             # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
-            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline is not None]
+            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
             if len(cd) == 0:
                 t.cdeadline = t.deadline
             else:
@@ -432,7 +426,7 @@ def annotatetasks(tasks):
             t.bottom = max([p.dest.bottom + p.cost  for p in t.children])+t.cost
             t.slevel = max([p.dest.slevel   for p in t.children])+t.cost
             # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
-            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline is not None]
+            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
             if len(cd) == 0:
                 t.cdeadline = t.deadline
             else:
@@ -456,7 +450,7 @@ def loadtasksjson(fp):
     if type(j) == dict:
         # each a dictionary
         for id,ta in j.iteritems():
-            t = MTask(id,ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline"))
+            t = MTask(id,ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime))
             ts.append(t)
             td[t.id] = t
         for id,ta in j.iteritems():
@@ -465,7 +459,7 @@ def loadtasksjson(fp):
     else:
         # each is a list with 
         for ta in j:
-            t = MTask(ta["id"],ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline"))
+            t = MTask(ta["id"],ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime))
             ts.append(t)
             td[t.id] = t
         for ta in j:
@@ -484,7 +478,7 @@ def loadtasksdot(fp):
     for n in g2.get_nodes():   
         ad =      n.get_attributes()
         #print n.get_name(),[a for a in ad]
-        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",0)))
+        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",MTask.deadlinemaxtime)))
         tasks.append(t)
         tasksd[t.id] = t
     # if present use the attribute cost
@@ -585,7 +579,7 @@ def drawsched(name,schedule,tasks):
                 cr.stroke_preserve()
                 cr.set_source_rgb(*c)
                 cr.fill()
-            if t.deadline is not None and t.lateststart > t.deadline:
+            if t.deadline < MTask.deadlinemaxtime and t.lateststart > t.deadline:
                 cr.arc(bx+pheight/8.0, py+pheight/8.0, pheight/8.0,0,2*math.pi)
                 cr.set_source_rgb(0, 0, 0)
                 cr.stroke_preserve()
@@ -622,7 +616,7 @@ def analyzeschedule(schedule,tasks):
     for t in tasks:
         if len(t.proc) == 0:
             print "not computed",t.id
-        if t.deadline is not None and t.deadline-t.lateststart < 0: # NOT t.deadline < t.lateststart
+        if t.deadline < MTask.deadlinemaxtime and t.deadline-t.lateststart < 0: # NOT t.deadline < t.lateststart
             print "missed deadline"
             deadlineerrors += 1
         for s in t.sparents:

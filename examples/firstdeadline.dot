@@ -1,6 +1,6 @@
 digraph G {
 	A [cost=10,maxnp=16];
-	E [deadline=4];
+	E [deadline=2];
 	C [deadline=21];
 	A -> B [cost=10];
 	E -> C;
