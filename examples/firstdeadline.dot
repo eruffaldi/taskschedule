@@ -1,0 +1,7 @@
+digraph G {
+	A [cost=10,maxnp=16];
+	E [deadline=4];
+	A -> B [cost=10];
+	E -> C;
+	B -> C;
+}

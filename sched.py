@@ -25,11 +25,11 @@ def forall(u,op):
     for x in u:
         op(x)
 
+
 # global for controlling computation in fraction vs float
 makenumbers = fractions.Fraction
 # global for controlling number of cores (0=max)
 defaultcore = 0 # ALL
-
 
 class MTaskEdge:
     """Edge of a M-Task with edge cost"""
@@ -40,11 +40,18 @@ class MTaskEdge:
 
 class MTask:
     """M-Task"""
-    def __init__(self,id,cost,maxnp):
+    def __init__(self,id,cost,maxnp,deadline=None):
         self.id = id       # identifier
         self.parents = [] # inputs as MTaskEdge
         self.maxnp = maxnp # maximu number of processors (0=all means infinitely splittable!)
         self.cost = makenumbers(cost)     # cost values (should be evenly divisible by maxnp if maxnp is not null)
+        if deadline is not None:
+            if deadline == 0:
+                self.deadline = None
+            else:
+                self.deadline = makenumbers(deadline)
+        else:
+            self.deadline = deadline
 
         # Computed FIXED propertirs
         self.sparents = set()  # tasks in parents
@@ -52,15 +59,20 @@ class MTask:
         self.top = 0        # t-level
         self.slevel = 0     # s-level (not counitng edge cost)
         self.bottom = 0     # b-level
+        self.cdeadline = deadline  # children earliest deadline
 
         # Scheduling Results
         self.endtime = 0       # time of last proc running task
         self.earlieststart = 0 # time of effectiv first start among tasks in proc
+        self.lateststart = 0
         self.proc = set() # processors used
-        self.Np = 0         # effective number of processor (request) == len(self.proc)
+        self.ucost = self.cost # self.cost/self.Np
+        self.Np = 1         # effective number of processor (request) == len(self.proc)
     def __repr__(self):
-        return "MTask %s cost=%d top=%s bottom=%s slevel=%d maxnp=%d parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,self.maxnp,[t.id for t in self.sparents],[t.dest.id for t in self.children])
-
+        return "MTask %s cost=%d top=%s bottom=%s slevel=%d maxnp=%d early/late=%s %s deadline/c=%s %s parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,self.maxnp,self.earlieststart,self.lateststart,self.deadline,self.cdeadline,[t.id for t in self.sparents],[t.dest.id for t in self.children])
+    def updateNp(self,n):
+        self.Np = n
+        self.ucost = self.cost / self.Np
 # use of task by Processor, it was (s,e,t) but we need also slicing
 class ProcTask:
     def __init__(self,proc,task,begin,end):
@@ -149,8 +161,10 @@ def recomputetaskproc(schedule,tasks):
             # strange no allocation
             t.earlieststart = 0
             t.endtime = 0
+            t.lateststart = 0
         else:
             t.earlieststart = min([q.begin for q in t.proc])
+            t.lateststart   = max([q.begin for q in t.proc])
             t.endtime = max([q.end for q in t.proc])
             if t.Np == 1:
                 # just one for all
@@ -188,6 +202,7 @@ def MLS(tasks,numCores,args):
     for t in tasks:
         t.proc = set()
         t.earlieststart = None
+        t.lateststart = None
         t.endtime = None
         if len(t.sparents) == 0:
             heapq.heappush(ready,(0,t)) # for entries the earliest==bottom==0
@@ -210,12 +225,13 @@ def MLS(tasks,numCores,args):
                 t = e.dest
                 if len(set(t.sparents)-done) == 0: # TODO: improve efficiency of this
                     t.earlieststart = justdonetime # minimum time for this due to this LAST parent
+                    t.lateststart = justdonetime
                     # TODO: should we add the input costs?
                     #print "adding",t.id,"earliest",justdonetime
                     if args.earliest:
-                        heapq.heappush(ready,(justdonetime,t)) # or priority, in any case i s0
+                        heapq.heappush(ready,((t.cdeadline,justdonetime),t)) # or priority, in any case i s0
                     else:
-                        heapq.heappush(ready,(t.bottom,t)) # or priority, in any case i s0
+                        heapq.heappush(ready,((t.cdeadline,t.bottom),t)) # or priority, in any case i s0
                    
         # get highest priority
         pri,t = heapq.heappop(ready)
@@ -232,7 +248,7 @@ def MLS(tasks,numCores,args):
         #
         # We would like also to 
         # split cost due to parallelims, precompute all input transfers
-        basecost = t.cost/makenumbers(t.Np)
+        basecost = t.ucost
 
         if args.nextproc:
             # we cannot allocate due to the lack of available processors
@@ -250,7 +266,7 @@ def MLS(tasks,numCores,args):
                 ee = max(p.next,t.earlieststart) + basecost
                 if optionminimizedeps:
                     epp = set()
-                for x in t.parents:
+                for x in t.parents: # x is TaskEdge
                     if args.transitive and x.source in p.stasks:
                         continue # result already transferred
                     else:
@@ -312,6 +328,7 @@ def MLS(tasks,numCores,args):
                 heapq.heappush(procpq,(p.next,p))
 
         t.earlieststart = picked[0][1].tasks[-1].begin  # adjusted to reflect 
+        t.lateststart = picked[-1][1].tasks[-1].begin   # adjusted to reflect 
         t.endtime = picked[-1][1].tasks[-1].end
 
         heapq.heappush(running,(t.endtime,t)) # tend is the end of the last proc for task t
@@ -324,7 +341,7 @@ def cpr(tasks,numCores,args):
     """Computes using CPR"""
     # clean assignments
     for t in tasks:
-        t.Np = 1
+        t.updateNp(1)
 
     # build the ready pq using bottom (can be also earliest starting tiem)
     T,ta = MLS(tasks,numCores,args)
@@ -340,7 +357,7 @@ def cpr(tasks,numCores,args):
             if t.Np == t.maxnp: #saturated
                 del chi[index]
             else:
-                t.Np += 1
+                t.updateNp(t.Np+1)
                 # try distribution using given unmber of cores for given processor
                 Ti,tai = MLS(tasks,numCores,args)
                 #print "tried upgrade of ",t.id," with ",t.Np," obtaining ",Ti,"vs previous",T
@@ -349,7 +366,7 @@ def cpr(tasks,numCores,args):
                     ta = tai
                     Tchanged = True
                 else:
-                    t.Np -= 1
+                    t.updateNp(t.Np-1)
                     del chi[index]
     recomputetaskproc(ta,tasks)
     return dict(schedule=ta,T=T)
@@ -369,11 +386,19 @@ def updatepriorities(schedule,tasks):
 
     for t in tasks[::-1]:
         if len(t.children) == 0:
-            t.bottom = t.cost
-            t.slevel = t.cost
+            t.bottom = t.ucost
+            t.slevel = t.ucost
+            t.cdeadline = t.deadline
         else:
-            t.bottom = max([p.dest.bottom + p.cost for p in t.children])+t.cost
-            t.slevel = max([p.dest.slevel  for p in t.children])+t.cost
+            t.bottom = max([p.dest.bottom + p.cost for p in t.children])+t.ucost
+            t.slevel = max([p.dest.slevel  for p in t.children])+t.ucost            
+            # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
+            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline is not None]
+            if len(cd) == 0:
+                t.cdeadline = t.deadline
+            else:
+                # move it back using my current cost, and anyway later than my deadline (if any)
+                t.cdeadline = min(t.deadline,min(cd)-t.ucost)
 
 
 def annotatetasks(tasks):
@@ -394,9 +419,17 @@ def annotatetasks(tasks):
         if len(t.children) == 0:
             t.bottom = t.cost
             t.slevel = t.cost
+            t.cdeadline = t.deadline
         else:
             t.bottom = max([p.dest.bottom + p.cost  for p in t.children])+t.cost
             t.slevel = max([p.dest.slevel   for p in t.children])+t.cost
+            # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
+            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline is not None]
+            if len(cd) == 0:
+                t.cdeadline = t.deadline
+            else:
+                # move it back using my current cost, and anyway later than my deadline (if any)
+                t.cdeadline = min(t.deadline,min(cd)-t.ucost)
 
 
 def loadtasksjson(fp):
@@ -415,7 +448,7 @@ def loadtasksjson(fp):
     if type(j) == dict:
         # each a dictionary
         for id,ta in j.iteritems():
-            t = MTask(id,ta.get("cost",1),ta.get("maxnp",defaultcore))
+            t = MTask(id,ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline"))
             ts.append(t)
             td[t.id] = t
         for id,ta in j.iteritems():
@@ -424,7 +457,7 @@ def loadtasksjson(fp):
     else:
         # each is a list with 
         for ta in j:
-            t = MTask(ta["id"],ta.get("cost",1),ta.get("maxnp",defaultcore))
+            t = MTask(ta["id"],ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline"))
             ts.append(t)
             td[t.id] = t
         for ta in j:
@@ -443,7 +476,7 @@ def loadtasksdot(fp):
     for n in g2.get_nodes():   
         ad =      n.get_attributes()
         #print n.get_name(),[a for a in ad]
-        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)))
+        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",0)))
         tasks.append(t)
         tasksd[t.id] = t
     # if present use the attribute cost
@@ -536,6 +569,13 @@ def drawsched(name,schedule,tasks):
                 cr.stroke_preserve()
                 cr.set_source_rgb(*c)
                 cr.fill()
+            if q.deadline is not None and q.lateststart > q.deadline:
+                cr.rectangle(bx, py, pheight/4.0,pheight/4.0)
+                cr.set_source_rgb(0, 0, 0)
+                cr.stroke_preserve()
+                cr.set_source_rgb((255,0,255))
+                cr.fill()
+
 
         py += pheight+pymargin
     if not svgmode:
@@ -546,6 +586,7 @@ def drawsched(name,schedule,tasks):
 def analyzeschedule(schedule,tasks):
     """Analyzes Schedule for Errors"""
     avgs = []
+    deadlineerrors = 0
     errors = 0
     #runs = []
     for p in schedule:
@@ -562,12 +603,15 @@ def analyzeschedule(schedule,tasks):
     for t in tasks:
         if len(t.proc) == 0:
             print "not computed",t.id
+        if t.deadline is not None and t.deadline-t.lateststart < 0: # NOT t.deadline < t.lateststart
+            print "missed deadline"
+            deadlineerrors += 1
         for s in t.sparents:
             if t.earlieststart < s.endtime:
                 print "inversion for ",t.id," starts ",t.earlieststart," against ",s.id," ends ",s.endtime
                 errors += 1
 
-    return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors)
+    return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors,deadlineerrors=deadlineerrors)
 
 def loadsched(f):
     pass
@@ -628,10 +672,13 @@ if __name__ == "__main__":
     if args.algorithm == "cpr":
         r = cpr(tasks,args.cores,args)  
         r["tasks"] = tasks
+        updatepriorities(r["schedule"],tasks)
         e = analyzeschedule(r["schedule"],tasks)
         for p in r["schedule"]:
             print p
         print e
+        for t in tasks:
+            print t
         print "Total",float(r["T"])
         if args.output:
             # TODO store in the output flags for the synchronization

@@ -1,4 +1,4 @@
 
-- maybe other non-het schedulers
-- heterogeneous scheduler
-- clustering graph
+- extend to etherogeneous
+- verify adherence to DSC. Our MLS function is the same as DSC but verify
+- add support for deadlines in DSC
