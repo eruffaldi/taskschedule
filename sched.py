@@ -253,11 +253,11 @@ def MLS(tasks,numCores,args):
         if args.nextproc:
             # we cannot allocate due to the lack of available processors
             if t.Np > len(procpq):
-                return 1e100,[]
+                return None,[]
             picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
         else:
             if t.Np > len(proco):
-                return 1e100,[]
+                return None,[]
             allp = []
             # compute the end-time of the choice
             optionminimizedeps = True # given same cost optimize for minimize affinity
@@ -331,6 +331,10 @@ def MLS(tasks,numCores,args):
         t.lateststart = picked[-1][1].tasks[-1].begin   # adjusted to reflect 
         t.endtime = picked[-1][1].tasks[-1].end
 
+        # fail
+        if t.deadline is not None and t.lateststart > t.deadline:
+            return None,[]
+
         heapq.heappush(running,(t.endtime,t)) # tend is the end of the last proc for task t
 
     # end time is max
@@ -347,6 +351,9 @@ def cpr(tasks,numCores,args):
     T,ta = MLS(tasks,numCores,args)
     Tchanged = True
 
+    if T is None:
+        return dict(schedule=[],T=0)
+
 
     while Tchanged: # not modified
         Tchanged = False
@@ -361,11 +368,12 @@ def cpr(tasks,numCores,args):
                 # try distribution using given unmber of cores for given processor
                 Ti,tai = MLS(tasks,numCores,args)
                 #print "tried upgrade of ",t.id," with ",t.Np," obtaining ",Ti,"vs previous",T
-                if Ti < T:                
+                if Ti is not None and Ti < T:     # NOTE: None < x for any x != None           
                     T = Ti
                     ta = tai
                     Tchanged = True
                 else:
+                    # failed
                     t.updateNp(t.Np-1)
                     del chi[index]
     recomputetaskproc(ta,tasks)
@@ -502,17 +510,25 @@ def loadtasksdot(fp):
 def drawsched(name,schedule,tasks):
     # draw the make span horizontally (#proc < #tasks)
     import cairo
-    maxspan = max([x.next for x in schedule])
     nproc = len(schedule)
-    minspan = min([min([q.end-q.begin for q in p.tasks]) for p in schedule])
-    maxtext = max([max([len(str(q.task.id)) for q in p.tasks]) for p in schedule])
+    if nproc > 0:
+        maxspan = max([x.next for x in schedule])
+        minspan = min([min([q.end-q.begin for q in p.tasks]) for p in schedule])
+        maxtext = max([max([len(str(q.task.id)) for q in p.tasks]) for p in schedule])
+    else:
+        maxspan = 0
+        minspan = 0
+        maxtext = 0
     pheight = 20
     pymargin = 2
     pxmargin = 2
     fontsize = 12
     height = (pheight+pymargin)*(nproc+1)
     # minimum (for text) should be 50 pixels
-    timescale = (maxtext*fontsize+20)/minspan
+    if minspan != 0:
+        timescale = (maxtext*fontsize+20)/minspan
+    else:
+        timescale =1 
     width = int(maxspan*timescale+pxmargin*2)
 
     svgmode = name.endswith(".svg")
@@ -585,6 +601,9 @@ def drawsched(name,schedule,tasks):
 
 def analyzeschedule(schedule,tasks):
     """Analyzes Schedule for Errors"""
+    if len(schedule) == 0:
+        return dict(avgslack=0,used=0,errors=0,deadlineerrors=0)
+
     avgs = []
     deadlineerrors = 0
     errors = 0
