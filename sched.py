@@ -569,11 +569,11 @@ def drawsched(name,schedule,tasks):
                 cr.stroke_preserve()
                 cr.set_source_rgb(*c)
                 cr.fill()
-            if q.deadline is not None and q.lateststart > q.deadline:
-                cr.rectangle(bx, py, pheight/4.0,pheight/4.0)
+            if t.deadline is not None and t.lateststart > t.deadline:
+                cr.arc(bx+pheight/8.0, py+pheight/8.0, pheight/8.0,0,2*math.pi)
                 cr.set_source_rgb(0, 0, 0)
                 cr.stroke_preserve()
-                cr.set_source_rgb((255,0,255))
+                cr.set_source_rgb(255,0,0)
                 cr.fill()
 
 
