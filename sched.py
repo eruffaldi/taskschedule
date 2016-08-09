@@ -16,11 +16,17 @@ import heapq
 import fractions
 import argparse
 import operator
+import itertools
 from collections import OrderedDict
 from functools import reduce as _reduce
 import json
 import operator
 
+try:
+    from pulp import *
+    haspulp = True
+except:
+    haspulp = False
 def forall(u,op):
     for x in u:
         op(x)
@@ -74,14 +80,24 @@ class ProcTask:
         self.task = task
         self.begin = begin
         self.end = end
-        self.rangesplit = (0,0) # (istart,iend)
+        self.rangesplit = (0,0) # (istart,iend) for parallel
 class Proc:
     """Processor allocation"""
     def __init__(self,index):
         self.index = index # number of the processor
-        self.tasks = []    # (start,end,task) for the ones to be executed
+        self.tasks = []    # ProcTask for the ones to be executed
+        
+        # Temporary
         self.next = 0      # last task completed == self.tasks[-1][1]
         self.stasks = set() # task of which Proc contains all results
+    def addTask(self,task,begin,end):
+        pt = ProcTask(self,task,begin,end)
+        task.proc.add(pt)
+        self.tasks.append(pt)
+    def clear(self):
+        self.tasks = []
+        self.next = 0
+        self.stasks = set()
     def __repr__(self):
         if makenumbers == float:
             return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f, %d-%d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1]) for q in self.tasks]))
@@ -639,11 +655,138 @@ def loadtasks(f):
     annotatetasks(tasks)
     return tasks
 
+
+def xpulp(tasks,P,args):
+    """
+    Towards the Optimal Solution of the Multiprocessor Scheduling Problem with Communication Delays, Davidovic
+    Using: Y. Guan and R.K. Cheung (2004), The berth allocation problem: models and solution meth- ods. OR Spectrum, 26(1):75–92
+    """
+    if not haspulp:
+        print "missing pulp"
+        return None
+
+    N = len(tasks)
+    alli  = range(1,N+1)
+    allp  = range(1,P+1)
+    allij = list(itertools.product(range(1,N+1),range(1,N+1))) # product 1-based with i==j
+    allhk = list(itertools.product(range(1,P+1),range(1,P+1))) # product 1-based with h==k
+    allih = itertools.product(range(1,N+1),range(1,P+1)) # product 1-based
+    #allijhk = itertools.product(range(1,N+1),range(1,N+1),range(1,P+1),range(1,P+1)) # product 1-based by 4
+
+    def makebin(name):
+        return LpVariable(name,cat='Binary')
+    def makelin(name,max):
+        return LpVariable(name,lowBound=0,upBound=max,cat='Continuous')
+    def makeint(name,max):
+        return LpVariable(name,lowBound=1,upBound=max,cat='Integer')
+    Wmax = 1000 #TODO compute
+    makenormalized = lambda name: makelin(name,1)
+    makeproc = lambda name: makeint(name,P)
+    maketask = lambda name: makeint(name,N)
+    maketime = lambda name: makelin(name,Wmax)
+
+    # we embed the constraint in the variable type definition for the time
+    t = [makelin("t_%d" % i,min(Wmax,tasks[i-1].deadline)) for i in alli] #t[i:task]:time TODO add here the timelimit
+    p = [makeproc("p_%d" % i) for i in alli] # p[i:task]:proc
+    x = dict([(ih,makebin("x_%d_%d" % ih)) for ih in allih]) # x[i:task,h:proc]:binary if i runs on h <=> p[i:task]
+
+    # in the following we create also for i==j but we'll not use this case
+    si = dict([(ij,makebin("si_%d_%d" % ij)) for ij in allij]) # si[i,j:task]:binary
+    eps = dict([(ij,makebin("eps_%d_%d" % ij)) for ij in allij]) # eps[i,j:task]:binary
+
+    # we avoid creating z explicitly
+    #z = dict([(ijhk,makebin("z_%d_%d_%d" % ijhk)) for allijhk]) # z[i,j:task,h,k:proc]:normalized
+    z = dict()
+    W = maketime("W") # the objective time function 0..Wmax
+
+    prob = LpProblem("The fantastic scheduler",LpMinimize)
+    prob += W, "Span"    
+
+    # build task object to index 1-based
+    # build cost array
+    inv = {}
+    L = []
+    for i,tt in enumerate(tasks):
+        inv[tt] = i+1
+        L.append(tt.cost)
+    print "costs",L
+
+    # constraints
+    for i in range(1,N+1):
+        prob += t[i-1] + L[i-1] <= W # execution smaller than maxspan
+        prob += sum([k*x[(i,k)] for k in allp]) == p[i-1]  # match task of processor wiht processor of task
+        prob += sum([x[(i,k)] for k in allp]) == 1 # only one processor
+
+    # this holds for all i != j
+    for i in range(1,N+1):
+        for j in range(1,N+1):
+            if i == j:
+                continue
+            sij = si[(i,j)]
+            epsij = eps[(i,j)]
+            prob += t[j-1] - t[i-1] - L[i-1] - (sij-1) * Wmax >= 0  # ?
+            prob += p[j-1] - p[i-1] - 1 - (epsij-1) * P >= 0 # ?
+            if i > j:
+                # symmetric enforcement
+                sji = si[(j,i)]
+                epsji = eps[(j,i)]
+                prob += sij+sji+epsij+epsji >= 1
+                prob += sij + sji <= 1
+                prob += epsij + epsji <= 1
+
+    for j in range(1,N+1): # all task 1-based
+        tt = tasks[j-1]
+        for pt in tt.parents: # all parent tasks objects
+            i = inv[pt.source] # 1-based
+            prob += si[(i,j)] == 1 # dependency
+
+            # we need all these
+            for h,k in allhk:
+                q = (i,j,h,k)
+                z[q] = makebin("z_%d_%d_%d_%d" % q)
+
+            # eq. 32
+            for k in allp:
+                prob += sum([z[(i,j,h,k)] for h in allp]) == x[(j,k)]   
+
+            # eq. 33 symmetric: z[ijhk] == z[jikh] BUT we never create ji
+
+            # cost is edge cost
+            prob += t[i-1] + L[i-1] + sum([ (h!=k and pt.cost or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
+
+    prob.writeLP("pulp.lp")
+    prob.solve()
+    print("Status:", LpStatus[prob.status])
+    print("Objective:", value(prob.objective))
+    print("maxspan",W.varValue)
+    for i,v in enumerate(t):
+        print(v.name, "=", v.varValue)
+        tt = tasks[i]
+        tt.earlieststart = v.varValue # time of effectiv first start among tasks in proc
+        tt.lateststart = tt.earlieststart
+        tt.endtime = tt.cost + tt.earlieststart       # time of last proc running task
+        tt.Np = 1
+        tt.proc = set()
+    for i,v in enumerate(p):
+        print(v.name, "=", v.varValue)
+
+    stasks = tasks[:]
+    stasks.sort(key=lambda k: k.earlieststart)
+    schedule = [Proc(h) for h in range(1,P+1)]
+
+    # build the ProcTask by scanning the tasks ordered
+    for tt in stasks:
+        i = inv[tt]
+        proc = schedule[int(p[i-1].varValue)-1]
+        proc.addTask(tt,tt.earlieststart,tt.endtime)
+
+    return dict(T=W.varValue,schedule=schedule)
+
 if __name__ == "__main__":
 
     import argparse
     parser = argparse.ArgumentParser(description='Task Scheduling for Multiprocessor - Emanuele Ruffaldi 2016 SSSA')
-    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none')
+    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none pulp')
     parser.add_argument('input',help="input file")  
     parser.add_argument('--cores',type=int,default=4,help="number of cores for the scheduling")
     parser.add_argument('--verbose',action="store_true")
@@ -660,7 +803,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.usefloats:
+    if args.usefloats or args.algorithm == "pulp":
         makenumbers = float
 
     if args.transitive:
@@ -684,40 +827,46 @@ if __name__ == "__main__":
             print t
     if args.algorithm == "cpr":
         r = cpr(tasks,args.cores,args)  
-        r["tasks"] = tasks
-        updatepriorities(r["schedule"],tasks)
-        e = analyzeschedule(r["schedule"],tasks)
-        for p in r["schedule"]:
-            print p
-        print e
-        for t in tasks:
-            print t
-        print "Total",float(r["T"])
-        if args.output:
-            # TODO store in the output flags for the synchronization
-            s = []
-            for p in r["schedule"]:
-                pp = []
-                for q in p.tasks:
-                    pp.append(dict(task=q.task.id,span=[float(q.begin),float(q.end)],split=len(q.task.proc)))
-                s.append(pp)
-            j = dict(maxspan=float(r["T"]),schedule=s)
-            if args.output == "-":
-                fp = sys.stdout
-            else:
-                fp = open(args.output,"wb")
-            json.dump(j,fp,sort_keys=True,indent=4, separators=(',', ': '))
-        if args.savepng or args.savesvg:
-            drawsched(args.savepng or args.savesvg,r["schedule"],tasks)
-        if args.saverun:
-            import sched2run
-            oo = sched2run.sched2run(r["schedule"],r["tasks"])
-            open(args.saverun,"wb").write("\n".join([" ".join([str(z) for z in y]) for y in oo]))
-
+    elif args.algorithm == "pulp":
+        r = xpulp(tasks,args.cores,args)  
     elif args.algorithm == "none":
         print "Tasks",len(tasks)
         for t in tasks:
             print t
+        sys.exit(0)
     else:
         print "unknown algorithm",args.algorithm
+        sys.exit(0)
+
+    #Regular Run
+    r["tasks"] = tasks
+    updatepriorities(r["schedule"],tasks)
+    e = analyzeschedule(r["schedule"],tasks)
+    for p in r["schedule"]:
+        print p
+    print e
+    for t in tasks:
+        print t
+    print "Total",float(r["T"])
+    if args.output:
+        # TODO store in the output flags for the synchronization
+        s = []
+        for p in r["schedule"]:
+            pp = []
+            for q in p.tasks:
+                pp.append(dict(task=q.task.id,span=[float(q.begin),float(q.end)],split=len(q.task.proc)))
+            s.append(pp)
+        j = dict(maxspan=float(r["T"]),schedule=s)
+        if args.output == "-":
+            fp = sys.stdout
+        else:
+            fp = open(args.output,"wb")
+        json.dump(j,fp,sort_keys=True,indent=4, separators=(',', ': '))
+    if args.savepng or args.savesvg:
+        drawsched(args.savepng or args.savesvg,r["schedule"],tasks)
+    if args.saverun:
+        import sched2run
+        oo = sched2run.sched2run(r["schedule"],r["tasks"])
+        open(args.saverun,"wb").write("\n".join([" ".join([str(z) for z in y]) for y in oo]))
+
 

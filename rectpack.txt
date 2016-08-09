@@ -1,0 +1,92 @@
+Towards the Optimal Solution of the Multiprocessor Scheduling Problem with Communication Delays, Davidovic
+Using: Y. Guan and R.K. Cheung (2004), The berth allocation problem: models and solution meth- ods. OR Spectrum, 26(1):75–92
+
+Single Task per Processor => paralleism has to be introduced manually AND later
+
+Input:
+	L[i:task]:duration
+	deltapre[i:task] = list:task  parents
+	C[i,j,h,k]:cost = cost of transfer from i to j with i in h and j in k
+	T[i:task]:time max if has deadline
+	Wmax = sum(i:task)(L[i]) + sum(i,j:task)(C[i,j] max(d[h,k]|h,k in P))
+
+
+Types
+	proc is enumeration
+		LpVariable(name,lowBound=,upBound,cat='Integer')
+	task is enumeration
+		LpVariable(name,lowBound=,upBound,cat='Integer')
+	binary
+		LpVariable(name,cat='Binary')
+	normalized [0,1]
+		LpVariable(name,lowBound=0,upBound=1,cat='Continuous')
+	time [0,Wmax]
+		LpVariable(name,lowBound=0,upBound=Wmax,cat='Continuous')
+
+Support variables
+	t[i:task]:time
+	p[i:task]:proc 
+	x[i:task,h:proc]:binary if i runs on h <=> p[i:task]
+	si[i:task,j:task]:binary if i runs before j   <=> si[i,j] == 1 for all j in deltapre[i]
+	eps[i:task,j:task]:binary if processor of i < j
+	z[i:task,j:task,h:proc,k:proc]:normalized
+
+objective: min W
+
+NOTNEEDED: 
+	W >= 0
+	t[i] >= 0
+	forall(i with deadline)
+		t[i] <= T[i]
+
+forall(i):
+	t[i] + L[i] <= W
+	sum(k:P) (k x[i,k]) = p[i]
+	sum(k:P) (x[i,k]) = 1
+
+forall(i,j): 
+	t[j] - t[i] - L[i] - (si[i,j]-1) Wmax >= 0
+	p[j] - p[i] - 1 - (eps[i,j]-1) |P| >= 0
+
+	# THESE ARE SYMMETRIC
+	si[i,j] + si[j,i] + eps[i,j] + eps[i,j] >= 1
+	si[i,j] + si[j,i] <= 1
+	eps[i,j] + eps[j,i] <= 1
+
+forall(i):
+	forall(j in deltapre(i))
+		si[i,j] = 1
+
+		NONLINEAR
+			t[i] + L[i] + sum(h,k:task) C[i,j,h,k] x[i,h] x[j,k] <= t[j]
+			z[i,j,h,k] = x[i,h] x[j,k]  with z[i:task,j:task,h:proc,k:proc]:real [0..1]
+		becomes:
+			t[i] + L[i] + sum(h,k:task) C[i,j,h,k] z[i,h,j,k] <= t[j]
+
+			+ constraint over z with:
+				forall(i,j,h,k):
+					x[i,h] >= z & x[j,k] >= z & x[i,h]+x[j,k] - 1 <= z
+			or better
+				forall(i,j,k with i !=j)
+					sum(h:proc) (z[i,j,h,k]) = x[j,k]  
+					forall(h:proc)
+						z[i,j,h,k] = z[j,i,k,h]
+
+-----------------------------------------------------------------
+HOW TO ADD the DATA parallelism for a given task allowed to split
+
+- the number of parallel pieces of the given task (up to maxnp or P)
+- we loose the fact that x[i,h] == p[i]
+- if we assume that all the parallel pieces start at the same time: t holds 
+
+	np[i:task]:proc (assuming max parallelism is P) this is the number of pieces of np (can be limited on specification to maxnp)
+
+	forall(i):
+		t[i] + L[i] <= W
+		sum(k:P) (x[i,k]) = np[i]
+
+TODO
+- p[i] needs to be changed, and similarly eps
+	p[j] - p[i] - 1 - (eps[i,j]-1) |P| >= 0
+		REQUIRES: sum(k:P) (k x[i,k]) = p[i]
+
