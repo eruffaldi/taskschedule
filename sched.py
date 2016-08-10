@@ -73,6 +73,14 @@ class MTask:
     def updateNp(self,n):
         self.Np = n
         self.ucost = self.cost / self.Np
+    def setOneRun(self,tstart):
+        self.earlieststart = tstart # time of effectiv first start among tasks in proc
+        self.lateststart = tstart
+        self.endtime = self.cost + tstart      # time of last proc running task
+        self.Np = 1
+        self.ucost = self.cost
+        self.proc = set()
+
 # use of task by Processor, it was (s,e,t) but we need also slicing
 class ProcTask:
     def __init__(self,proc,task,begin,end):
@@ -94,6 +102,7 @@ class Proc:
         pt = ProcTask(self,task,begin,end)
         task.proc.add(pt)
         self.tasks.append(pt)
+        self.next = max(task.endtime,self.next)
     def clear(self):
         self.tasks = []
         self.next = 0
@@ -541,6 +550,8 @@ def drawsched(name,schedule,tasks):
         timescale =1 
     width = int(maxspan*timescale+pxmargin*2)
 
+    print "draw nproc",nproc," timescale",timescale
+
     svgmode = name.endswith(".svg")
     if svgmode:
         surface = cairo.SVGSurface (name,width, height)
@@ -659,7 +670,7 @@ def loadtasks(f):
 def xpulp(tasks,P,args):
     """
     Towards the Optimal Solution of the Multiprocessor Scheduling Problem with Communication Delays, Davidovic
-    Using: Y. Guan and R.K. Cheung (2004), The berth allocation problem: models and solution meth- ods. OR Spectrum, 26(1):75–92
+    Using: Uang Cheung (2004), The berth allocation problem: models and solution methods. 
     """
     if not haspulp:
         print "missing pulp"
@@ -670,8 +681,12 @@ def xpulp(tasks,P,args):
     allp  = range(1,P+1)
     allij = list(itertools.product(range(1,N+1),range(1,N+1))) # product 1-based with i==j
     allhk = list(itertools.product(range(1,P+1),range(1,P+1))) # product 1-based with h==k
-    allih = itertools.product(range(1,N+1),range(1,P+1)) # product 1-based
+    allih = list(itertools.product(range(1,N+1),range(1,P+1))) # product 1-based
     #allijhk = itertools.product(range(1,N+1),range(1,N+1),range(1,P+1),range(1,P+1)) # product 1-based by 4
+
+    print "allij",allij
+    print "allhk",allhk
+    print "allih",allih
 
     def makebin(name):
         return LpVariable(name,cat='Binary')
@@ -690,7 +705,7 @@ def xpulp(tasks,P,args):
     p = [makeproc("p_%d" % i) for i in alli] # p[i:task]:proc
     x = dict([(ih,makebin("x_%d_%d" % ih)) for ih in allih]) # x[i:task,h:proc]:binary if i runs on h <=> p[i:task]
 
-    # in the following we create also for i==j but we'll not use this case
+    # in the following we create but not use i== j
     si = dict([(ij,makebin("si_%d_%d" % ij)) for ij in allij]) # si[i,j:task]:binary
     eps = dict([(ij,makebin("eps_%d_%d" % ij)) for ij in allij]) # eps[i,j:task]:binary
 
@@ -734,25 +749,34 @@ def xpulp(tasks,P,args):
                 prob += sij + sji <= 1
                 prob += epsij + epsji <= 1
 
+    usecompact = False
     for j in range(1,N+1): # all task 1-based
         tt = tasks[j-1]
         for pt in tt.parents: # all parent tasks objects
             i = inv[pt.source] # 1-based
             prob += si[(i,j)] == 1 # dependency
 
-            # we need all these
+            # z[ij hk] := x[ij hk] x[ji kh]
             for h,k in allhk:
                 q = (i,j,h,k)
                 z[q] = makebin("z_%d_%d_%d_%d" % q)
 
-            # eq. 32
-            for k in allp:
-                prob += sum([z[(i,j,h,k)] for h in allp]) == x[(j,k)]   
+            if not usecompact:
+                for h,k in allhk:
+                    prob += x[(i,h)] >= z[(i,j,h,k)]
+                    prob += x[(j,k)] >= z[(i,j,h,k)]
+                    prob += x[(i,h)]+x[(j,k)]-1 <= z[(i,j,h,k)]
+            else:
+                # eq. 32
+                for k in allp:
+                    prob += sum([z[(i,j,h,k)] for h in allp]) == x[(j,k)]   
+                # eq. 33 symmetric: z[ijhk] == z[jikh] BUT we never create z[ji**] being DAG
+                # BUT we do not USE z[]
+                # prob += z[(i,j,h,k)] == z[(j,i,k,h)]
 
-            # eq. 33 symmetric: z[ijhk] == z[jikh] BUT we never create ji
+            # the model employed is DELAY cost not DESER cost
+            prob += t[i-1] + L[i-1] + sum([ (h !=k and pt.cost or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
 
-            # cost is edge cost
-            prob += t[i-1] + L[i-1] + sum([ (h!=k and pt.cost or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
 
     prob.writeLP("pulp.lp")
     prob.solve()
@@ -761,12 +785,7 @@ def xpulp(tasks,P,args):
     print("maxspan",W.varValue)
     for i,v in enumerate(t):
         print(v.name, "=", v.varValue)
-        tt = tasks[i]
-        tt.earlieststart = v.varValue # time of effectiv first start among tasks in proc
-        tt.lateststart = tt.earlieststart
-        tt.endtime = tt.cost + tt.earlieststart       # time of last proc running task
-        tt.Np = 1
-        tt.proc = set()
+        tasks[i].setOneRun(v.varValue)
     for i,v in enumerate(p):
         print(v.name, "=", v.varValue)
 
@@ -779,6 +798,8 @@ def xpulp(tasks,P,args):
         i = inv[tt]
         proc = schedule[int(p[i-1].varValue)-1]
         proc.addTask(tt,tt.earlieststart,tt.endtime)
+
+    schedule = [p for p in schedule if len(p.tasks) > 0]
 
     return dict(T=W.varValue,schedule=schedule)
 
