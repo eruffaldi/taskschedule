@@ -760,7 +760,7 @@ def xpulp(tasks,P,args):
 
 
     prob.writeLP("pulp.lp")
-    prob.solve()
+    prob.solve()#pulp.GLPK_CMD())
     print("Status:", LpStatus[prob.status])
     print("Objective:", value(prob.objective))
     print("maxspan",W.varValue)
