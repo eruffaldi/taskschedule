@@ -258,53 +258,42 @@ def MLS(tasks,numCores,args):
 
 
 
-        if t.Np > len(procpq):
-            return None,[]
-        picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
 
-        # TODO rewrite the affinity system to minimize delays
-        if False:
+        # AVOID load balancing in multiprocessor FAVOR affinity
+        if args.notfavoraffinity:
+            if t.Np > len(procpq):
+                return None,[]
+            picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
+        else:
             if t.Np > len(proco):
                 return None,[]
             allp = []
-            optionminimizedeps = True # given same cost optimize for minimize affinity
-            # 
+
+            
             for p in proco:
-                # we decide to run 
                 ee = max(p.next,t.earlieststart)
                 ees = [ee]
-                epp = set() # for optionminimizedeps
-                for x in t.parents: # TaskEdge
-                    if args.transitive and x.source in p.stasks:
+                epp = set() # number of depending processors
+                for te in t.parents: # TaskEdge
+                    if te.source in p.stasks:
                         continue # result already transferred, NO DELAY
                     else:
-                        pap = set([q.proc for q in x.source.proc])
+                        pap = set([q.proc for q in te.source.proc])
                         parentNp = makenumbers(len(pap))
-                        # NOTE for heterogeneouse modify this with cost[ta.source,t,ta.proc,p]
-                        if parentNp == 1:
-                            if not (args.samezerocost and p in pap):
-                                pass
-                        if args.samezerocost and p in pap:
-                            # ORIGINAL: we considered execution cost reduced: x.cost*((parentNp-1)/parentNp)
-                            if parentNp > 1:    
-                                ee += 0
-                        else:
-                            ees.append(ee+x.cost) # we need to wai
-                        if optionminimizedeps:
-                            epp = epp | pap
+
+                        # we need to WAIT arrival
+                        k = 1/parentNp
+                        ees.append([q.next + te.delay*k for q in pap])
+
+                        # epp contains all the list of predecessors
+                        epp = epp | pap
                 ee = max(ees)
-                if optionminimizedeps:
-                    if p in epp:
-                        epp.remove(p)
-                    allp.append((ee,p,len(epp)))
-                else:
-                    allp.append((ee,p))
-            if optionminimizedeps:
-                allp.sort(key=lambda x: (x[0],x[2]))
-                picked = [x[0:2] for x in allp[0:t.Np]]
-            else:
-                allp.sort(key=lambda x: x[0])
-                picked = allp[0:t.Np]
+                if p in epp:
+                    epp.remove(p)
+                allp.append((ee,p,len(epp)))
+
+            allp.sort(key=lambda x: (x[0],x[2]))
+            picked = [x[0:2] for x in allp[0:t.Np]]
 
         for ignored,p in picked:
             tstart = max(p.next,t.earlieststart)
@@ -334,7 +323,8 @@ def MLS(tasks,numCores,args):
             if t.Np == 1:
                 p.stasks.add(t) # contains all the result having it computed
 
-            heapq.heappush(procpq,(p.next,p))
+            if args.notfavoraffinity:
+                heapq.heappush(procpq,(p.next,p))
 
         t.earlieststart = picked[0][1].tasks[-1].begin  # adjusted to reflect 
         t.lateststart = picked[-1][1].tasks[-1].begin   # adjusted to reflect 
@@ -385,6 +375,8 @@ def cpr(tasks,numCores,args):
                     # failed
                     t.updateNp(t.Np-1)
                     del chi[index]
+    # remove processors
+    ta = [p for p in ta if len(p.tasks) > 0]
     recomputetaskproc(ta,tasks)
     return dict(schedule=ta,T=T)
 
@@ -522,8 +514,8 @@ def drawsched(name,schedule,tasks):
     nproc = len(schedule)
     if nproc > 0:
         maxspan = max([x.next for x in schedule])
-        minspan = min([min([q.end-q.begin for q in p.tasks]) for p in schedule])
-        maxtext = max([max([len(str(q.task.id)) for q in p.tasks]) for p in schedule])
+        minspan = min([len(p.tasks) > 0 and min([q.end-q.begin for q in p.tasks])  or 100000000 for p in schedule])
+        maxtext = max([len(p.tasks) > 0 and max([len(str(q.task.id)) for q in p.tasks]) or 0  for p in schedule])
     else:
         maxspan = 0
         minspan = 0
@@ -804,8 +796,9 @@ if __name__ == "__main__":
     parser.add_argument('--verbose',action="store_true")
     parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom-level for the MLS")
     parser.add_argument('--usefloats',action="store_true",help="compute using floats instead of fractions")
-    parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
+    parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split (ASSUMED in pulp)")
     parser.add_argument('--usecompact',action="store_true",help="compact z constraint for pulp model")
+    parser.add_argument('--notfavoraffinity',action="store_true",help="favor affinity favoraffinity (NOT in pulp)")
     #parser.add_argument('--transitive',action="store_true",help="transitive reduction")
     #parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
     parser.add_argument('--output',help="JSON output of scheduling")
