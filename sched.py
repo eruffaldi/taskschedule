@@ -38,10 +38,10 @@ makenumbers = fractions.Fraction
 defaultcore = 0 # ALL
 class MTaskEdge:
     """Edge of a M-Task with edge cost"""
-    def __init__(self,source,dest,cost):
+    def __init__(self,source,dest,delay):
         self.source = source # source MTask (parent of dest)
         self.dest = dest     # destination MTask (child of source)
-        self.cost = makenumbers(cost)  # cost of the transfer
+        self.delay = makenumbers(delay)  # cost of the transfer
 
 class MTask:
     deadlinemaxtime = 10000000
@@ -63,7 +63,7 @@ class MTask:
 
         # Scheduling Results
         self.endtime = 0       # time of last proc running task
-        self.earlieststart = 0 # time of effectiv first start among tasks in proc
+        self.earlieststart = 0 # time of effective first start among tasks in proc
         self.lateststart = 0
         self.proc = set() # processors used
         self.ucost = self.cost # self.cost/self.Np
@@ -97,12 +97,13 @@ class Proc:
         
         # Temporary
         self.next = 0      # last task completed == self.tasks[-1][1]
-        self.stasks = set() # task of which Proc contains all results
+        self.stasks = set() # task of which Proc contains all results (having executed or received)
     def addTask(self,task,begin,end):
         pt = ProcTask(self,task,begin,end)
         task.proc.add(pt)
         self.tasks.append(pt)
         self.next = max(task.endtime,self.next)
+        self.stasks.add(task)
     def clear(self):
         self.tasks = []
         self.next = 0
@@ -208,9 +209,8 @@ def MLS(tasks,numCores,args):
     """Computes MLS"""
     proco = [Proc(i) for i in range(1,numCores+1)]
     procpq = []
-    if args.nextproc:
-        for p in proco:
-            heapq.heappush(procpq,(0,p))
+    for p in proco:
+        heapq.heappush(procpq,(0,p))
 
     ready = [] # list
     needed = set(tasks) # all needed
@@ -243,10 +243,10 @@ def MLS(tasks,numCores,args):
             for e in justdone.children:
                 t = e.dest
                 if len(set(t.sparents)-done) == 0: # TODO: improve efficiency of this
-                    t.earlieststart = justdonetime # minimum time for this due to this LAST parent
+                    # minimum time for this due to this LAST parent
+                    # BUT we can start on ANY processor
+                    t.earlieststart = justdonetime 
                     t.lateststart = justdonetime
-                    # TODO: should we add the input costs?
-                    #print "adding",t.id,"earliest",justdonetime
                     if args.earliest:
                         heapq.heappush(ready,((t.cdeadline,justdonetime),t)) # or priority, in any case i s0
                     else:
@@ -257,47 +257,42 @@ def MLS(tasks,numCores,args):
         needed.remove(t)
 
 
-        # We should pick all the Np processors p that satisfy the following
-        #   next[p] + cost[t,p] + sum([cost[ta,t,proc[ta],p] for ta in parents[t]])
-        #
-        #   note: if proc[ta] > 1 we can take max or mean
-        #
-        # The above formulation is in the line of heterogeneous systems, and also deals with affinity: cost[ta,t,p,p] = 0
-        # In the classic formulation we simply order by: next[p]
-        #
-        # We would like also to 
-        # split cost due to parallelims, precompute all input transfers
-        basecost = t.ucost
 
-        if args.nextproc:
-            # we cannot allocate due to the lack of available processors
-            if t.Np > len(procpq):
-                return None,[]
-            picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
-        else:
+        if t.Np > len(procpq):
+            return None,[]
+        picked = [heapq.heappop(procpq) for i in range(0,t.Np)]
+
+        # TODO rewrite the affinity system to minimize delays
+        if False:
             if t.Np > len(proco):
                 return None,[]
             allp = []
-            # compute the end-time of the choice
             optionminimizedeps = True # given same cost optimize for minimize affinity
+            # 
             for p in proco:
-                # for heterogeneouse modify this with cost[t,p]
-                ee = max(p.next,t.earlieststart) + basecost
-                if optionminimizedeps:
-                    epp = set()
-                for x in t.parents: # x is TaskEdge
+                # we decide to run 
+                ee = max(p.next,t.earlieststart)
+                ees = [ee]
+                epp = set() # for optionminimizedeps
+                for x in t.parents: # TaskEdge
                     if args.transitive and x.source in p.stasks:
-                        continue # result already transferred
+                        continue # result already transferred, NO DELAY
                     else:
-                        n = makenumbers(len(x.source.proc))
                         pap = set([q.proc for q in x.source.proc])
-                        # for heterogeneouse modify this with cost[ta.source,t,ta.proc,p]
+                        parentNp = makenumbers(len(pap))
+                        # NOTE for heterogeneouse modify this with cost[ta.source,t,ta.proc,p]
+                        if parentNp == 1:
+                            if not (args.samezerocost and p in pap):
+                                pass
                         if args.samezerocost and p in pap:
-                            ee += x.cost*((n-1)/n)
+                            # ORIGINAL: we considered execution cost reduced: x.cost*((parentNp-1)/parentNp)
+                            if parentNp > 1:    
+                                ee += 0
                         else:
-                            ee += x.cost
+                            ees.append(ee+x.cost) # we need to wai
                         if optionminimizedeps:
                             epp = epp | pap
+                ee = max(ees)
                 if optionminimizedeps:
                     if p in epp:
                         epp.remove(p)
@@ -311,40 +306,35 @@ def MLS(tasks,numCores,args):
                 allp.sort(key=lambda x: x[0])
                 picked = allp[0:t.Np]
 
-        # we load the transfer cost into the RECEIVER and we DON'T charge the SENDER
-        allinputcosts0 = sum([x.cost for x in t.parents])
+        for ignored,p in picked:
+            tstart = max(p.next,t.earlieststart)
 
-        for pnext,p in picked:
-            if args.samezerocost:
-                # per p duration depends on the edge transferts
-                allinputcosts = 0
-                for x in t.parents: # for all parents of t
-                    if args.transitive and x.source in p.stasks:
-                        if args.verbose:
-                            print "transitive"
-                        continue
-                    if p in x.source.proc: # for all the k processors in which it has been split, if they contain p we can skip 1/k data transfer
-                        n = makenumbers(len(x.source.proc))
-                        allinputcosts += x.cost*(n-1)/n
-                    else:
-                        allinputcosts += x.cost # full cost being outside
-                    p.stasks.add(x.source) # we are inglobating it for scheduling t
-                duration = allinputcosts + basecost
-            else:
-                duration = allinputcosts0 + basecost
+            # we need to adjust tstart depending on delays
+            for te in t.parents: # TaskEdge
+                pa = te.source
+                if pa in p.stasks: # result of source already in stasks
+                    continue
+                else:
+                    # tstart depends on the maximum availability
+                    w = [po.proc.next + te.delay/pa.Np for po in pa.proc if po.proc != p]
+                    if len(w) > 0:
+                        print "adjust tstart",tstart,w
+                        tstart = max(tstart,max(w))
+
+                p.stasks.add(pa) # now this processor has the result of parent
 
             # compute execution range
-            tstart = max(p.next,t.earlieststart)
-            tend = tstart + duration
+            tend = tstart + t.ucost
             
             # create allocation
             q = ProcTask(p,t,tstart,tend)
             p.tasks.append(q) # tstart-p.next IS flexibility
             p.next = tend # marks next available
             t.proc.add(q)
+            if t.Np == 1:
+                p.stasks.add(t) # contains all the result having it computed
 
-            if args.nextproc:
-                heapq.heappush(procpq,(p.next,p))
+            heapq.heappush(procpq,(p.next,p))
 
         t.earlieststart = picked[0][1].tasks[-1].begin  # adjusted to reflect 
         t.lateststart = picked[-1][1].tasks[-1].begin   # adjusted to reflect 
@@ -409,7 +399,7 @@ def updatepriorities(schedule,tasks):
         if len(t.parents) == 0:
             t.top = 0
         else:
-            t.top = max([p.source.top + p.source.cost + p.cost for p in t.parents])
+            t.top = max([p.source.top + p.source.cost + p.delay for p in t.parents])
 
     for t in tasks[::-1]:
         if len(t.children) == 0:
@@ -417,7 +407,7 @@ def updatepriorities(schedule,tasks):
             t.slevel = t.ucost
             t.cdeadline = t.deadline
         else:
-            t.bottom = max([p.dest.bottom + p.cost for p in t.children])+t.ucost
+            t.bottom = max([p.dest.bottom + p.delay for p in t.children])+t.ucost
             t.slevel = max([p.dest.slevel  for p in t.children])+t.ucost            
             # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
             cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
@@ -437,7 +427,7 @@ def annotatetasks(tasks):
             t.top = 0
         else:
             t.sparents = set([x.source for x in t.parents])
-            t.top = max([p.source.top + p.source.cost + p.cost for p in t.parents])
+            t.top = max([p.source.top + p.source.cost + p.delay for p in t.parents])
             #t.top = max([p.top + p.cost for p in t.sparents])
         for p in t.parents:         
             p.source.children.append(p)
@@ -448,7 +438,7 @@ def annotatetasks(tasks):
             t.slevel = t.cost
             t.cdeadline = t.deadline
         else:
-            t.bottom = max([p.dest.bottom + p.cost  for p in t.children])+t.cost
+            t.bottom = max([p.dest.bottom + p.delay  for p in t.children])+t.cost
             t.slevel = max([p.dest.slevel   for p in t.children])+t.cost
             # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
             cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
@@ -521,7 +511,7 @@ def loadtasksdot(fp):
             dt = MTask(e.get_destination(),1,defaultcore)
             tasks.append(dt)
             tasksd[dt.id] = dt
-        dt.parents.append(MTaskEdge(st,dt,float(e.get_attributes().get("cost",0))))
+        dt.parents.append(MTaskEdge(st,dt,float(e.get_attributes().get("delay",0))))
 
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
@@ -749,7 +739,6 @@ def xpulp(tasks,P,args):
                 prob += sij + sji <= 1
                 prob += epsij + epsji <= 1
 
-    usecompact = False
     for j in range(1,N+1): # all task 1-based
         tt = tasks[j-1]
         for pt in tt.parents: # all parent tasks objects
@@ -761,21 +750,21 @@ def xpulp(tasks,P,args):
                 q = (i,j,h,k)
                 z[q] = makebin("z_%d_%d_%d_%d" % q)
 
-            if not usecompact:
+            if not args.usecompact:
                 for h,k in allhk:
                     prob += x[(i,h)] >= z[(i,j,h,k)]
                     prob += x[(j,k)] >= z[(i,j,h,k)]
                     prob += x[(i,h)]+x[(j,k)]-1 <= z[(i,j,h,k)]
             else:
-                # eq. 32
+                # eq. 32 
                 for k in allp:
                     prob += sum([z[(i,j,h,k)] for h in allp]) == x[(j,k)]   
                 # eq. 33 symmetric: z[ijhk] == z[jikh] BUT we never create z[ji**] being DAG
                 # BUT we do not USE z[]
                 # prob += z[(i,j,h,k)] == z[(j,i,k,h)]
 
-            # the model employed is DELAY cost not DESER cost
-            prob += t[i-1] + L[i-1] + sum([ (h !=k and pt.cost or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
+            # the model employed is DELAY, this is a heavy constraint noting that z(i,j,h,k) is mutually exclusive in (h,k)
+            prob += t[i-1] + L[i-1] + sum([ (h != k and pt.delay or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
 
 
     prob.writeLP("pulp.lp")
@@ -787,6 +776,8 @@ def xpulp(tasks,P,args):
         print(v.name, "=", v.varValue)
         tasks[i].setOneRun(v.varValue)
     for i,v in enumerate(p):
+        print(v.name, "=", v.varValue)
+    for i,v in enumerate(z.values()):
         print(v.name, "=", v.varValue)
 
     stasks = tasks[:]
@@ -814,9 +805,9 @@ if __name__ == "__main__":
     parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom-level for the MLS")
     parser.add_argument('--usefloats',action="store_true",help="compute using floats instead of fractions")
     parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split")
-    parser.add_argument('--samezerocost',action="store_true",help="skip edge cost for same processor edges")
-    parser.add_argument('--transitive',action="store_true",help="transitive reduction (activates --samezerocost)")
-    parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
+    parser.add_argument('--usecompact',action="store_true",help="compact z constraint for pulp model")
+    #parser.add_argument('--transitive',action="store_true",help="transitive reduction")
+    #parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
     parser.add_argument('--output',help="JSON output of scheduling")
     parser.add_argument('--savepng',help="emit PNG")
     parser.add_argument('--savesvg',help="emit SVG")
@@ -826,9 +817,6 @@ if __name__ == "__main__":
 
     if args.usefloats or args.algorithm == "pulp":
         makenumbers = float
-
-    if args.transitive:
-        args.samezerocost = True
 
     if args.allunicore:
         defaultcore = 1

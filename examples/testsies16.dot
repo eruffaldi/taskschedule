@@ -9,13 +9,13 @@ digraph G {
 	a7 [cost=1.5];
 	a8 [cost=1];
 
-	a1 -> a2 [cost=1];
-	a1 -> a3 [cost=1];
-	a2 -> a4 [cost=1];
-	a2 -> a5 [cost=1];
-	a5 -> a8 [cost=1];
-	a5 -> a7 [cost=1];
-	a4 -> a6 [cost=1];
-	a5 -> a5 [cost=1];
-	a3 -> a6 [cost=1];
+	a1 -> a2 [delay=1];
+	a1 -> a3 [delay=1];
+	a2 -> a4 [delay=1];
+	a2 -> a5 [delay=1];
+	a5 -> a8 [delay=1];
+	a5 -> a7 [delay=1];
+	a4 -> a6 [delay=1];
+	a5 -> a5 [delay=1];
+	a3 -> a6 [delay=1];
 }

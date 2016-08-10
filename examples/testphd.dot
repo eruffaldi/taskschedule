@@ -10,18 +10,18 @@ digraph G {
 	n8 [cost=4];
 	n9 [cost=1];
 
-	n1 -> n2 [cost=4];
-	n1 -> n3 [cost=1];
-	n1 -> n4 [cost=1];
-	n1 -> n5 [cost=1];
-	n1 -> n7 [cost=10];
+	n1 -> n2 [delay=4];
+	n1 -> n3 [delay=1];
+	n1 -> n4 [delay=1];
+	n1 -> n5 [delay=1];
+	n1 -> n7 [delay=10];
 
-	n2 -> n6  [cost=1];
-	n2 -> n7  [cost=1];
-	n3 -> n8  [cost=1];
-	n4 -> n8  [cost=1];
+	n2 -> n6  [delay=1];
+	n2 -> n7  [delay=1];
+	n3 -> n8  [delay=1];
+	n4 -> n8  [delay=1];
 
-	n6 -> n9  [cost=5];
-	n7 -> n9  [cost=6];
-	n8 -> n9  [cost=5]
+	n6 -> n9  [delay=5];
+	n7 -> n9  [delay=6];
+	n8 -> n9  [delay=5]
 }
