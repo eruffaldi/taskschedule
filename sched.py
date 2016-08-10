@@ -737,26 +737,31 @@ def xpulp(tasks,P,args):
             i = inv[pt.source] # 1-based
             prob += si[(i,j)] == 1 # dependency
 
-            # z[ij hk] := x[ij hk] x[ji kh]
-            for h,k in allhk:
-                q = (i,j,h,k)
-                z[q] = makebin("z_%d_%d_%d_%d" % q)
-
-            if not args.usecompact:
-                for h,k in allhk:
-                    prob += x[(i,h)] >= z[(i,j,h,k)]
-                    prob += x[(j,k)] >= z[(i,j,h,k)]
-                    prob += x[(i,h)]+x[(j,k)]-1 <= z[(i,j,h,k)]
+            if args.quadratic:
+                prob += t[i-1] + L[i-1] + sum([ (h != k and pt.delay or 0) * x[(i,h)] * x[(j,k)] for h,k in allhk]) <= t[j-1] # time
             else:
-                # eq. 32 
-                for k in allp:
-                    prob += sum([z[(i,j,h,k)] for h in allp]) == x[(j,k)]   
-                # eq. 33 symmetric: z[ijhk] == z[jikh] BUT we never create z[ji**] being DAG
-                # BUT we do not USE z[]
-                # prob += z[(i,j,h,k)] == z[(j,i,k,h)]
+                # z[ij hk] := x[ij hk] x[ji kh]
+                for h,k in allhk:
+                    q = (i,j,h,k)
+                    z[q] = makebin("z_%d_%d_%d_%d" % q)
+                    # NOTE z[(j,i,k,h)] = z[q]
 
-            # the model employed is DELAY, this is a heavy constraint noting that z(i,j,h,k) is mutually exclusive in (h,k)
-            prob += t[i-1] + L[i-1] + sum([ (h != k and pt.delay or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
+                if not args.usecompact:
+                    for h,k in allhk:
+                        q = (i,j,h,k)
+                        prob += x[(i,h)] >= z[q]
+                        prob += x[(j,k)] >= z[q]
+                        prob += x[(i,h)]+x[(j,k)]-1 <= z[q]
+                else:
+                    # eq. 32 
+                    for k in allp:
+                        prob += sum([z[(i,j,h,k)] for h in allp]) == x[(j,k)]   
+                    # eq. 33 symmetric: z[ijhk] == z[jikh] BUT we never create z[ji**] being DAG
+                    # BUT we do not USE z[]
+                    # prob += z[(i,j,h,k)] == z[(j,i,k,h)]
+
+                # the model employed is DELAY, this is a heavy constraint noting that z(i,j,h,k) is mutually exclusive in (h,k)
+                prob += t[i-1] + L[i-1] + sum([ (h != k and pt.delay or 0) * z[(i,j,h,k)] for h,k in allhk]) <= t[j-1] # time
 
 
     prob.writeLP("pulp.lp")
@@ -798,6 +803,7 @@ if __name__ == "__main__":
     parser.add_argument('--usefloats',action="store_true",help="compute using floats instead of fractions")
     parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split (ASSUMED in pulp)")
     parser.add_argument('--usecompact',action="store_true",help="compact z constraint for pulp model")
+    parser.add_argument('--quadratic',action="store_true",help="quadratic model for pulp (not supported so far by pulp)")
     parser.add_argument('--notfavoraffinity',action="store_true",help="favor affinity favoraffinity (NOT in pulp)")
     #parser.add_argument('--transitive',action="store_true",help="transitive reduction")
     #parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
