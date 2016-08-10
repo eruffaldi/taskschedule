@@ -635,6 +635,11 @@ def analyzeschedule(schedule,tasks):
 
     return dict(avgslack=float(sum(avgs)/len(schedule)),used=len(avgs),errors=errors,deadlineerrors=deadlineerrors)
 
+def defmax(a,default):
+    if len(a) == 0:
+        return default
+    else:
+        return max(a)
 def loadsched(f):
     pass
 
@@ -672,18 +677,21 @@ def xpulp(tasks,P,args):
 
     def makebin(name):
         return LpVariable(name,cat='Binary')
-    def makelin(name,max):
-        return LpVariable(name,lowBound=0,upBound=max,cat='Continuous')
-    def makeint(name,max):
-        return LpVariable(name,lowBound=1,upBound=max,cat='Integer')
-    Wmax = 1000 #TODO compute
-    makenormalized = lambda name: makelin(name,1)
+    def makelinpos(name,maxv):
+        return LpVariable(name,lowBound=0,upBound=maxv,cat='Continuous')
+    def makeint(name,maxv):
+        return LpVariable(name,lowBound=1,upBound=maxv,cat='Integer')
+    Wmax = sum([t.cost + defmax([te.delay for te in t.parents],0) for t in tasks])
+    print "Wmax is",Wmax
+    makenormalized = lambda name: makelinpos(name,1)
     makeproc = lambda name: makeint(name,P)
     maketask = lambda name: makeint(name,N)
-    maketime = lambda name: makelin(name,Wmax)
+    maketime = lambda name: makelinpos(name,Wmax)
 
     # we embed the constraint in the variable type definition for the time
-    t = [makelin("t_%d" % i,min(Wmax,tasks[i-1].deadline)) for i in alli] #t[i:task]:time TODO add here the timelimit
+    t = [makelinpos("t_%d" % i,min(Wmax,tasks[i-1].deadline)) for i in alli] #t[i:task]:time TODO add here the timelimit
+
+    # ALTERNATIVELY use dicts of LpVariable
     p = [makeproc("p_%d" % i) for i in alli] # p[i:task]:proc
     x = dict([(ih,makebin("x_%d_%d" % ih)) for ih in allih]) # x[i:task,h:proc]:binary if i runs on h <=> p[i:task]
 
@@ -697,6 +705,12 @@ def xpulp(tasks,P,args):
     W = maketime("W") # the objective time function 0..Wmax
 
     prob = LpProblem("The fantastic scheduler",LpMinimize)
+
+    #Not needed
+    prob += W >= 0, "Enforce positivity"
+    for tt in t:
+        prob += tt >= 0, "Enforce positivity of " + tt.name
+
     prob += W, "Span"    
 
     # build task object to index 1-based
