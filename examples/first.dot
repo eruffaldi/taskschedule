@@ -1,5 +1,5 @@
 digraph G {
-	A [cost=10,maxnp=16];
+	A [cost=10,items=16];
 	A -> B [delay=10];
 	E -> C;
 	B -> C;

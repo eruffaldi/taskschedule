@@ -34,24 +34,37 @@ def forall(u,op):
 
 # global for controlling computation in fraction vs float
 makenumbers = fractions.Fraction
-# global for controlling number of cores (0=max)
-defaultcore = 0 # ALL
+
+defaultcore = 0
+
 class MTaskEdge:
-    """Edge of a M-Task with edge cost"""
-    def __init__(self,source,dest,delay):
+    """Edge of a M-Task with edge cost
+
+    Is reduction means that the destination task is a reduction task of a data-parallel map-reduction task. This means that if the map-reduction task has
+    Np == 1 then we can consider the reduction task as 0 cost and skippable
+
+    When instead we split the map-reduction we need to 
+    """
+    def __init__(self,source,dest,delay,isreduction=False):
         self.source = source # source MTask (parent of dest)
         self.dest = dest     # destination MTask (child of source)
         self.delay = makenumbers(delay)  # cost of the transfer
+        self.isreduction = isreduction
 
 class MTask:
     deadlinemaxtime = 10000000
     """M-Task"""
-    def __init__(self,id,cost,maxnp,deadline=deadlinemaxtime):
+    def __init__(self,id,cost,items,maxnp,deadline=deadlinemaxtime,reductioncost=0):
         self.id = id       # identifier
         self.parents = [] # inputs as MTaskEdge
-        self.maxnp = maxnp # maximu number of processors (0=all means infinitely splittable!)
+        self.items = items
+        self.maxnp = maxnp # maximu number of splits (0=all means infinitely splittable!)
+        if self.maxnp == 0 or self.maxnp > self.items:
+            self.maxnp = self.items
         self.cost = makenumbers(cost)     # cost values (should be evenly divisible by maxnp if maxnp is not null)
         self.deadline = makenumbers(deadline)
+        self.reductioncost = reductioncost
+        self.doesreduction = False
 
         # Computed FIXED propertirs
         self.sparents = set()  # tasks in parents
@@ -69,10 +82,27 @@ class MTask:
         self.ucost = self.cost # self.cost/self.Np
         self.Np = 1         # effective number of processor (request) == len(self.proc)
     def __repr__(self):
-        return "MTask %s cost=%d top=%s bottom=%s slevel=%d maxnp=%d early/late=%s %s deadline/c=%s %s parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,self.maxnp,self.earlieststart,self.lateststart,self.deadline,self.cdeadline,[t.id for t in self.sparents],[t.dest.id for t in self.children])
+        return "MTask %s cost=%d top=%s bottom=%s slevel=%d items=%d maxnp=%d early/late=%s %s deadline/c=%s %s parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,self.items,self.maxnp,self.earlieststart,self.lateststart,self.deadline,self.cdeadline,[t.id for t in self.sparents],[t.dest.id for t in self.children])
     def updateNp(self,n):
+        print "updateNp for ",self.id,self.Np,n
         self.Np = n
         self.ucost = self.cost / self.Np
+        for c in self.children:
+            if c.isreduction:
+                c.dest.maxnp = 1 # 1 processor
+                if n == 1:
+                    # remove it
+                    c.dest.items = 0
+                    c.dest.cost = 0
+                    c.dest.ucost = 0
+                    c.dest.doesreduction = False
+                else:
+                    # does n but without parallelism
+                    c.dest.items = n # n items
+                    unitaryreductioncost = self.reductioncost / self.items
+                    c.dest.cost = unitaryreductioncost * n
+                    c.dest.ucost = c.dest.cost
+                    c.dest.doesreduction = True
     def setOneRun(self,tstart):
         self.earlieststart = tstart # time of effectiv first start among tasks in proc
         self.lateststart = tstart
@@ -88,7 +118,7 @@ class ProcTask:
         self.task = task
         self.begin = begin
         self.end = end
-        self.rangesplit = (0,0) # (istart,iend) for parallel
+        self.rangesplit = (0,0,0) # (istart,iend,target) for parallel
 class Proc:
     """Processor allocation"""
     def __init__(self,index):
@@ -110,9 +140,9 @@ class Proc:
         self.stasks = set()
     def __repr__(self):
         if makenumbers == float:
-            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f, %d-%d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1]) for q in self.tasks]))
+            return "Proc(%d) ends %.2f tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%.2f %.2f, %d-%d %d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1],q.rangesplit[2]) for q in self.tasks]))
         else:
-            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s, %d-%d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1]) for q in self.tasks]))
+            return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s, %d-%d %d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1],q.rangesplit[2]) for q in self.tasks]))
 
 
 # Taken from: https://pypi.python.org/pypi/toposort/1.0
@@ -188,22 +218,21 @@ def recomputetaskproc(schedule,tasks):
             t.endtime = max([q.end for q in t.proc])
             if t.Np == 1:
                 # just one for all
-                list(t.proc)[0].rangesplit = (0,t.maxnp)
-            elif t.maxnp > 0:
-                # we have a boundex task so we can split it
-                k = int(math.ceil(t.maxnp/t.Np))
+                list(t.proc)[0].rangesplit = (0,t.items,0)
+            elif t.items > 0:                
+                # we have a data-parallel task split over t.proc
+                k = int(math.ceil(t.items/t.Np))
                 z = list(t.proc)
                 i0 = 0
                 for i in range(0,len(t.proc)):
-                    z[i].rangesplit = (i0,i0+k)
+                    z[i].rangesplit = (i0,i0+k,i)
                     i0 += k
                 # NOTE: with k we overstimate, so we could have some excess in the last. We do not take this into account
-                z[-1].rangesplit = (z[-1].rangesplit[0],t.maxnp)
+                z[-1].rangesplit = (z[-1].rangesplit[0],t.items,z[-1].rangesplit[2])
             else:
-                # unbounded paralle tasks assign 1 slot to every processor
-                z = list(t.proc)
-                for i in range(0,len(t.proc)):
-                    z[i].rangesplit = (i,i)
+                # unbounded paralle tasks assign 1 slot to every processor REMOVED
+                sys.exit(0)
+                pass
 
 def MLS(tasks,numCores,args):
     """Computes MLS"""
@@ -391,7 +420,7 @@ def updatepriorities(schedule,tasks):
         if len(t.parents) == 0:
             t.top = 0
         else:
-            t.top = max([p.source.top + p.source.cost + p.delay for p in t.parents])
+            t.top = max([p.source.top + p.source.ucost + p.delay for p in t.parents])
 
     for t in tasks[::-1]:
         if len(t.children) == 0:
@@ -402,7 +431,7 @@ def updatepriorities(schedule,tasks):
             t.bottom = max([p.dest.bottom + p.delay for p in t.children])+t.ucost
             t.slevel = max([p.dest.slevel  for p in t.children])+t.ucost            
             # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
-            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
+            cd = [p.dest.cdeadline-p.delay for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
             if len(cd) == 0:
                 t.cdeadline = t.deadline
             else:
@@ -419,21 +448,21 @@ def annotatetasks(tasks):
             t.top = 0
         else:
             t.sparents = set([x.source for x in t.parents])
-            t.top = max([p.source.top + p.source.cost + p.delay for p in t.parents])
+            t.top = max([p.source.top + p.source.ucost + p.delay for p in t.parents])
             #t.top = max([p.top + p.cost for p in t.sparents])
         for p in t.parents:         
             p.source.children.append(p)
 
     for t in tasks[::-1]:
         if len(t.children) == 0:
-            t.bottom = t.cost
-            t.slevel = t.cost
+            t.bottom = t.ucost
+            t.slevel = t.ucost
             t.cdeadline = t.deadline
         else:
-            t.bottom = max([p.dest.bottom + p.delay  for p in t.children])+t.cost
-            t.slevel = max([p.dest.slevel   for p in t.children])+t.cost
+            t.bottom = max([p.dest.bottom + p.delay  for p in t.children])+t.ucost
+            t.slevel = max([p.dest.slevel   for p in t.children])+t.ucost
             # move back the cdeadline (if any) of each child by the transfer cost and sum up my cost
-            cd = [p.dest.cdeadline-p.cost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
+            cd = [p.dest.cdeadline-p.ucost for p in t.children if p.dest.cdeadline < MTask.deadlinemaxtime]
             if len(cd) == 0:
                 t.cdeadline = t.deadline
             else:
@@ -446,7 +475,8 @@ def loadtasksjson(fp):
     # inputs can be id of task or (id,cost)
     def makedge(x,d):
         if type(x) is list:
-            return MTaskEdge(x[0],d,float(x[1]))
+            # (source,delay,[isreduction])
+            return MTaskEdge(x[0],d,float(x[1]),len(x) > 2 and int(x) != 0 or 0)
         else:
             return MTaskEdge(x,d,0)
     ts = []
@@ -457,7 +487,7 @@ def loadtasksjson(fp):
     if type(j) == dict:
         # each a dictionary
         for id,ta in j.iteritems():
-            t = MTask(id,ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime))
+            t = MTask(id,ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime),ta.get("reductioncost",0))
             ts.append(t)
             td[t.id] = t
         for id,ta in j.iteritems():
@@ -466,7 +496,7 @@ def loadtasksjson(fp):
     else:
         # each is a list with 
         for ta in j:
-            t = MTask(ta["id"],ta.get("cost",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime))
+            t = MTask(ta["id"],ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime,ta.get("reductioncost",0)))
             ts.append(t)
             td[t.id] = t
         for ta in j:
@@ -485,7 +515,7 @@ def loadtasksdot(fp):
     for n in g2.get_nodes():   
         ad =      n.get_attributes()
         #print n.get_name(),[a for a in ad]
-        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",MTask.deadlinemaxtime)))
+        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("items",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",MTask.deadlinemaxtime)),float(ad.get("reductioncost",0)))
         tasks.append(t)
         tasksd[t.id] = t
     # if present use the attribute cost
@@ -495,15 +525,15 @@ def loadtasksdot(fp):
         #get_attributes
         st = tasksd.get(e.get_source(),None)
         if st is None:
-            st = MTask(e.get_source(),1,defaultcore)
+            st = MTask(e.get_source(),1,1,defaultcore)
             tasks.append(st)
             tasksd[st.id] = st
         dt = tasksd.get(e.get_destination(),None)
         if dt is None:
-            dt = MTask(e.get_destination(),1,defaultcore)
+            dt = MTask(e.get_destination(),1,1,defaultcore)
             tasks.append(dt)
             tasksd[dt.id] = dt
-        dt.parents.append(MTaskEdge(st,dt,float(e.get_attributes().get("delay",0))))
+        dt.parents.append(MTaskEdge(st,dt,float(e.get_attributes().get("delay",0)),float(e.get_attributes().get("reduction",0))))
 
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
@@ -514,8 +544,8 @@ def drawsched(name,schedule,tasks):
     nproc = len(schedule)
     if nproc > 0:
         maxspan = max([x.next for x in schedule])
-        minspan = min([len(p.tasks) > 0 and min([q.end-q.begin for q in p.tasks])  or 100000000 for p in schedule])
-        maxtext = max([len(p.tasks) > 0 and max([len(str(q.task.id)) for q in p.tasks]) or 0  for p in schedule])
+        minspan = min([len(p.tasks) > 0 and min([q.end-q.begin for q in p.tasks if q.task.ucost > 0])  or 100000000 for p in schedule])
+        maxtext = max([len(p.tasks) > 0 and max([len(str(q.task.id)) for q in p.tasks if q.task.ucost > 0]) or 0  for p in schedule])
     else:
         maxspan = 0
         minspan = 0
@@ -530,9 +560,10 @@ def drawsched(name,schedule,tasks):
         timescale = (maxtext*fontsize+20)/minspan
     else:
         timescale =1 
+    timescale = max(timescale,1)
     width = int(maxspan*timescale+pxmargin*2)
 
-    print "draw nproc",nproc," timescale",timescale
+    print "draw nproc",nproc," timescale",timescale,"maxtext",maxtext,"minspan",minspan
 
     svgmode = name.endswith(".svg")
     if svgmode:
@@ -554,6 +585,8 @@ def drawsched(name,schedule,tasks):
             e = q.end
             b = q.begin
             t = q.task
+            if t.ucost == 0:
+                continue
             durwidth = (e-b)*timescale
             durwidth -= pxmargin
             bx = b*timescale+pxmargin
@@ -662,6 +695,8 @@ def xpulp(tasks,P,args):
     if not haspulp:
         print "missing pulp"
         return None
+
+    print "pulp has no DATA-PARALLELISM or REDUCTION"
 
     N = len(tasks)
     alli  = range(1,N+1)
@@ -815,7 +850,6 @@ if __name__ == "__main__":
     parser.add_argument('--verbose',action="store_true")
     parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom-level for the MLS")
     parser.add_argument('--usefloats',action="store_true",help="compute using floats instead of fractions")
-    parser.add_argument('--allunicore',action="store_true",help="all tasks cannot be split (ASSUMED in pulp)")
     parser.add_argument('--usecompact',action="store_true",help="compact z constraint for pulp model")
     parser.add_argument('--quadratic',action="store_true",help="quadratic model for pulp (not supported so far by pulp)")
     parser.add_argument('--notfavoraffinity',action="store_true",help="favor affinity favoraffinity (NOT in pulp)")
@@ -830,9 +864,6 @@ if __name__ == "__main__":
 
     if args.usefloats or args.algorithm == "pulp":
         makenumbers = float
-
-    if args.allunicore:
-        defaultcore = 1
 
     if args.input.endswith(".json"):
         tasks = loadtasksjson(open(args.input,"rb"))

@@ -99,11 +99,15 @@ def sched2run(schedule,tasks):
 				if si is not None:
 					ss.append(makeWAIT(index,si))
 
-			# TODO SPECIAL CASE FOR mapreduce and reduce
-			if len(t.proc) == 1: # single
+			if t.items > 1:
+				# mapreduce or data-parallel in any case it runs 
+				ss.append(makeRUNTASKPAR(index,taskid2id[t.id],q.rangesplit[0],q.rangesplit[1],q.rangesplit[2]))
+			elif t.items == 0:
+				# we support semaphores but no tasks or action
+				pass
+			else:
+				
 				ss.append(makeRUNTASK(index,taskid2id[t.id]))				
-			else: # par
-				ss.append(makeRUNTASKPAR(index,taskid2id[t.id],q.rangesplit[0],q.rangesplit[1]))
 
 			# notify if needed by THIS task instance
 			si = tasksem.get(t.id)

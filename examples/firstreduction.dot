@@ -1,0 +1,6 @@
+digraph G {
+	A [cost=10,items=16,reductioncost=2];
+	A -> B [delay=2,reduction=1];
+	E -> C;
+	B -> C;
+}
