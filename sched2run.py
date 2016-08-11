@@ -4,7 +4,7 @@ def enum(*sequential, **named):
     enums = dict(zip(sequential, range(len(sequential))), **named)
     return type('Enum', (), enums)
 
-Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKPAR,WAIT,NOTIFY,SLEEP".split(",")))
+Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKPAR,WAIT,NOTIFY,SLEEP,NUMREDUCETARGET".split(",")))
 #action tid id p0 p1 p2 p3
 
 #NUMTHREADS p0
@@ -12,13 +12,17 @@ Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKP
 #NUMACTIONS p0
 #SEMAPHORE id=sem p0=count
 #RUNTASK tid id=task
-#RUNTASKPAR tid id=task p0-p1 is rang
+#RUNTASKPAR tid id=task p0-p1 p2=target
 #WAIT id=sem
 #NOTIFY id=sem
 #SLEEP not used
+#NUMREDUCETARGET tid=thread(or ALL) id=task n=size (where task is the mapreduce)
 
 def makeTHREADS(n,implicitjoin=0):
 	return [Actions.NUMTHREADS,0,0,n,implicitjoin]
+
+def makeNUMREDUCETARGET(tid,sid,n):
+	return [Actions.NUMREDUCETARGET,tid,sid,n,0]
 
 def makeSEMAPHORES(n):
 	return [Actions.NUMSEMAPHORES,0,0,n,0]
@@ -32,8 +36,8 @@ def makeSEMAPHORE(sid,n):
 def makeRUNTASK(tid,id):
 	return [Actions.RUNTASK,tid,id,0,0]
 
-def makeRUNTASKPAR(tid,id,f,e):
-	return [Actions.RUNTASK,tid,id,f,e,0]
+def makeRUNTASKPAR(tid,id,f,e,target=0):
+	return [Actions.RUNTASKPAR,tid,id,f,e,target]
 
 def makeWAIT(tid,sid):
 	return [Actions.WAIT,tid,sid,0,0,0]
@@ -95,6 +99,7 @@ def sched2run(schedule,tasks):
 				if si is not None:
 					ss.append(makeWAIT(index,si))
 
+			# TODO SPECIAL CASE FOR mapreduce and reduce
 			if len(t.proc) == 1: # single
 				ss.append(makeRUNTASK(index,taskid2id[t.id]))				
 			else: # par
