@@ -82,7 +82,7 @@ class MTask:
         self.ucost = self.cost # self.cost/self.Np
         self.Np = 1         # effective number of processor (request) == len(self.proc)
     def __repr__(self):
-        return "MTask %s cost=%d top=%s bottom=%s slevel=%d items=%d maxnp=%d early/late=%s %s deadline/c=%s %s parents=%s children=%s" % (self.id,self.cost,self.top,self.bottom,self.slevel,self.items,self.maxnp,self.earlieststart,self.lateststart,self.deadline,self.cdeadline,[t.id for t in self.sparents],[t.dest.id for t in self.children])
+        return "MTask %s cost=%s top=%s bottom=%s slevel=%d items=%d maxnp=%d early/late=%s %s deadline/c=%s %s parents=%s children=%s" % (self.id,str(self.cost),self.top,self.bottom,self.slevel,self.items,self.maxnp,self.earlieststart,self.lateststart,self.deadline,self.cdeadline,[t.id for t in self.sparents],[t.dest.id for t in self.children])
     def updateNp(self,n):
         print "updateNp for ",self.id,self.Np,n
         self.Np = n
@@ -92,6 +92,7 @@ class MTask:
                 c.dest.maxnp = 1 # 1 processor
                 if n == 1:
                     # remove it
+                    print "Deselected Reduction",c.dest.id,"with cost",c.dest.cost
                     c.dest.items = 0
                     c.dest.cost = 0
                     c.dest.ucost = 0
@@ -99,7 +100,8 @@ class MTask:
                 else:
                     # does n but without parallelism
                     c.dest.items = n # n items
-                    unitaryreductioncost = self.reductioncost / self.items
+                    unitaryreductioncost = self.reductioncost / makenumbers(self.items)
+                    print "Selected Reduction",c.dest.id,"with cost",c.dest.cost
                     c.dest.cost = unitaryreductioncost * n
                     c.dest.ucost = c.dest.cost
                     c.dest.doesreduction = True

@@ -106,7 +106,6 @@ def sched2run(schedule,tasks):
 				# we support semaphores but no tasks or action
 				pass
 			else:
-				
 				ss.append(makeRUNTASK(index,taskid2id[t.id]))				
 
 			# notify if needed by THIS task instance
