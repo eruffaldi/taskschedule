@@ -52,13 +52,17 @@ def makeSLEEP(tid,tms):
 def sched2run(schedule,tasks):
 	implicitjoint = 0
 	o = []
-	o.append(makeTHREADS(len(schedule),implicitjoint))
+	o.append(["# op tid id p1 p2 p3"])
 
 	#map task id to numbers: first all integers
 	taskid2id = dict()
+	sems = []
+	osched = []
+	tasksem = {}
 	for t in tasks:
 		if type(t.id) == int:
 			taskid2id[t.id] = t.id
+
 	if len(taskid2id) == 0:
 		z = 1
 	else:
@@ -68,10 +72,12 @@ def sched2run(schedule,tasks):
 			taskid2id[t.id] = z
 			z = z + 1
 
-	sems = []
-	osched = []
-	tasksem = {}
+	# emit task map for later association of id to task.id
+	for k,v in taskid2id.iteritems():
+		o.append(["#","task",v,k])
 
+	o.append(makeTHREADS(len(schedule),implicitjoint))
+	
 	# compute semaphore of tasks by checking for AFFINITY
 	for t in tasks:
 		if len(t.proc) == 1:
