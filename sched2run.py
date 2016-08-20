@@ -18,6 +18,33 @@ Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKP
 #SLEEP not used
 #NUMREDUCETARGET tid=thread(or ALL) id=task n=size (where task is the mapreduce)
 
+class RunAction:
+	def __init__(self,*args):
+		self.action = args[0]
+		self.threadid = args[1]
+		self.id = args[2]
+		self.params = args[3:]
+		self.taskid = None #
+
+	@staticmethod
+	def fromfile(inf):
+		runid2id = dict()
+		aa = []
+		for x in inf:
+			x = x.strip()
+			if x.startswith("#"):
+				if x.startswith("# task"):
+					ig1,ig2,runid,id = x.split(" ",3)
+					runid2id[int(runid)] = id
+			else:
+				a = [int(y) for y in x.split(" ")]
+				q = RunAction(*a)
+				if q.action == Actions.RUNTASK or q.action == Actions.RUNTASKPAR or q.action == Actions.NUMREDUCETARGET:
+					q.taskid = runid2id.get(q.id,None)
+				aa.append(q)
+		return aa
+
+
 def makeTHREADS(n,implicitjoin=0):
 	return [Actions.NUMTHREADS,0,0,n,implicitjoin]
 
@@ -140,5 +167,13 @@ def sched2run(schedule,tasks):
 	for p in osched:
 		o.extend(p)
 	return o
+
+if __name__ == '__main__':
+	import sys
+	for a in sys.argv[1:]:
+		print "Doing",a
+		aa = RunAction.fromfile(open(a,"rb"))
+		for x in aa:
+			print x.action,x.threadid,x.id,x.taskid,x.params
 
 	

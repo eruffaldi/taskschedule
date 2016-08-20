@@ -471,6 +471,26 @@ def annotatetasks(tasks):
                 # move it back using my current cost, and anyway later than my deadline (if any)
                 t.cdeadline = min(t.deadline,min(cd)-t.ucost)
 
+def savetasksjson(tasks,fp):
+    ot = []
+    for t in tasks:
+        oti = dict(id=t.id,cost=str(t.cost),inputs=[])
+        if t.items != 1:
+            oti["items"] = t.items
+        if t.maxnp != defaultcore:
+            oti["maxnp"] = t.maxnp
+        if t.deadline != MTask.deadlinemaxtime:
+            oti["deadline"] = t.deadline
+        if t.reductioncost != 0:
+            oti["reductioncost"] = t.reductioncost
+        for p in t.parents:
+            if p.delay == 0 and not p.isreduction:
+                oti["inputs"].append(p.source.id)
+            else:
+                oti["inputs"].append(dict(source=p.source.id,delay=str(p.delay),reduction=p.isreduction and 1 or 0))
+        ot.append(oti)
+    json.dump(dict(tasks=ot),fp,sort_keys=True,indent=4, separators=(',', ': '))
+
 
 def loadtasksjson(fp):
     # array/dictionary of task with "id","cost","inputs"
@@ -479,6 +499,8 @@ def loadtasksjson(fp):
         if type(x) is list:
             # (source,delay,[isreduction])
             return MTaskEdge(x[0],d,float(x[1]),len(x) > 2 and int(x) != 0 or 0)
+        elif type(x) is dict:
+            return MTaskEdge(x["source"],d,x["delay"],x.get("reduction",False))
         else:
             return MTaskEdge(x,d,0)
     ts = []
@@ -486,26 +508,52 @@ def loadtasksjson(fp):
     j = json.load(fp)
     if type(j) == dict and "tasks" in j:
         j = j["tasks"]
-    if type(j) == dict:
-        # each a dictionary
+
+    alli = {}
+    if type(j) == dict:        
         for id,ta in j.iteritems():
-            t = MTask(id,ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime),ta.get("reductioncost",0))
-            ts.append(t)
-            td[t.id] = t
-        for id,ta in j.iteritems():
-            me = ts[id]
-            ts[id].parents = [makedge(td[x],me) for x in ta["inputs"]]
+            alli[id] = ta
     else:
-        # each is a list with 
-        for ta in j:
-            t = MTask(ta["id"],ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime,ta.get("reductioncost",0)))
-            ts.append(t)
-            td[t.id] = t
-        for ta in j:
-            if "inputs" in ta:
-                me = td[ta["id"]]
-                me.parents = [makedge(td[x],me) for x in ta["inputs"]]
+        for ta in j.iteritems():
+            alli[ta["id"]] = ta
+
+    for id,ta in alli.iteritems():
+        t = MTask(id,ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime),ta.get("reductioncost",0))
+        ts.append(t)
+        td[t.id] = t
+
+    # edges solved to objects (second pass)
+    for id,ta in alli.iteritems():
+        me = ts[id]
+        ts[id].parents = [makedge(td[x],me) for x in ta["inputs"]]
+
     return ts
+
+def savetasksdot(tasks,fp):
+    import pydot
+    g = pydot.Dot(graph_type="digraph")
+    for t in tasks:
+        # make pydot objects with minimal writings of attributes for readability
+        n = pydot.Node(t.id)
+        n.set("cost",str(t.cost))
+        if t.items != 1:
+            n.set("items",t.items)
+        if t.maxnp != defaultcore:
+            n.set("maxnp",t.maxnp)
+        if t.deadline != MTask.deadlinemaxtime:
+            n.set("deadline",t.deadline)
+        if t.reductioncost != 0:
+            n.set("reductioncost",t.reductioncost)
+        g.add_node(n)
+    for t in tasks:
+        for te in t.parents:
+            # make pydot objects for edges
+            e = pydot.Edge(te.source.id,t.id)
+            if te.delay != 0 or te.isreduction:
+                e.set("delay",te.delay)
+                e.set("reduction",te.isreduction and 1 or 0)
+            g.add_edge(e)
+    fp.write(unicode(g.to_string()))
 
 def loadtasksdot(fp):
     import pydot
@@ -858,6 +906,8 @@ if __name__ == "__main__":
     #parser.add_argument('--transitive',action="store_true",help="transitive reduction")
     #parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
     parser.add_argument('--output',help="JSON output of scheduling")
+    parser.add_argument('--savejson',help="emit JSON of the input graph")
+    parser.add_argument('--savedot',help="emit DOT of the input graph")
     parser.add_argument('--savepng',help="emit PNG")
     parser.add_argument('--savesvg',help="emit SVG")
     parser.add_argument('--saverun',help="emit RUN for taskrunner")
@@ -872,6 +922,12 @@ if __name__ == "__main__":
     else:
         tasks = loadtasksdot(open(args.input,"rb"))
 
+    if args.savejson:
+        savetasksjson(tasks,args.savejson == "-" and sys.stdout or open(args.savejson,"wb"))
+        sys.exit(0)
+    if args.savedot:
+        savetasksdot(tasks,args.savedot == "-" and sys.stdout or open(args.savedot,"wb"))
+        sys.exit(0)
     # topological sort
     tasks = toposorttasks(tasks)
 
