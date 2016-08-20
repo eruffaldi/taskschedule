@@ -38,7 +38,7 @@ def loadlog(logfile,actionlist):
 	#LOG = action index endtime(float) duration(float)
 	# space sep values with # comments
 	#onf << (int)(p.action) << " " << i << " " << relend.count() << " " << duration.count() << std::endl;;
-
+	r = []
 	for x in logfile:
 		x = x.strip()
 		if x.startswith("#"):
@@ -47,13 +47,20 @@ def loadlog(logfile,actionlist):
 			a = x.split(" ")
 			va = int(a[0])
 			vi = int(a[1])
+			if vi < 0:
+				# special log entry
+				continue
 			vendtime = float(a[2])
 			vduration = float(a[3])
+			aa = actionlist[vi]
+			if va != aa.action:
+				print "log and run action mismatch for",va,aa.action,"line",x
+				continue
 
 			t = RunActionLog()
 			t.index = vi
 			t.action = va
-			t.runaction = actionlist[t.index]
+			t.runaction = aa
 			t.endtime = vendtime
 			t.duration = vduration
 			r.append(t)
@@ -62,20 +69,27 @@ def loadlog(logfile,actionlist):
 def makestats(lf):
 	tasks = {}
 	for f in lf:
-		for t in lf:
-			if t.action == sched2run.Actions.TASK:
-				n = t.runaction.params[1]-t.runaction.params[0]
-				d = t.duration/n
-			elif t.action == sched2run.Actions.TASKPAR:
+		for t in f:
+			if t.action == sched2run.Actions.RUNTASK:
 				n = 1
+				d = t.duration / n
+			elif t.action == sched2run.Actions.RUNTASKPAR:
+				n = t.runaction.params[1]-t.runaction.params[0]
+				d = t.duration
+			else:
+				continue
+			if t.runaction.taskid is None:
+				print "not associated taskid for runtask",t.runaction.id
+				continue
 			l = tasks.get(t.runaction.taskid)
 			if l is None:
 				l = TaskStat(t.runaction.taskid,t.runaction.id)
-				tasks[t.taskid] = l
+				tasks[t.runaction.taskid] = l
 			l.samples += 1
 			l.worst = max(d,l.worst)
 			# or running mean
 			l.average += d
+
 	for v in tasks.values():
 		v.average /= v.samples
 	return tasks
@@ -85,7 +99,7 @@ if __name__ == "__main__":
 	import argparse
 
 	parser = argparse.ArgumentParser(description='Process log files of Task Runner')
-	parser.add_argument("logfile",nargs="+",dest="logfiles",help="list of log files to be used")
+	parser.add_argument("logfiles",nargs="+",help="list of log files to be used")
 	parser.add_argument("--run",required=True,help="run filename")
 	parser.add_argument("--graph",help="graph filename for updating the costs")
 	parser.add_argument("--info",action="store_true",help="details of log")
@@ -94,16 +108,17 @@ if __name__ == "__main__":
 	parser.add_argument("--outgraph",help="output graph",default="-")
 	args = parser.parse_args()
 
-	lr = sched2run.RunAction.fromfile(args.run)
-	lf = [loadlog(n,lr) for n in args.logfiles]
+	lr = sched2run.RunAction.fromfile(open(args.run,"rb"))
+	lf = [loadlog(open(n,"rb"),lr) for n in args.logfiles]
 
-	if args.graph.endswith(".json"):
-		gg = sched.loadtasksjson(open(args.graph,"rb"))
-	elif args.graph.endswith(".dot"):
-		gg = sched.loadtasksdot(open(args.graph,"rb"))
-	elif args.graph != "":
-		print "unknown graph file",args.graph
-		sys.exit(-1)
+	if args.graph is not None:
+		if args.graph.endswith(".json"):
+			gg = sched.loadtasksjson(open(args.graph,"rb"))
+		elif args.graph.endswith(".dot"):
+			gg = sched.loadtasksdot(open(args.graph,"rb"))
+		elif args.graph != "":
+			print "unknown graph file",args.graph
+			sys.exit(-1)
 	else:
 		gg = None
 
@@ -124,21 +139,24 @@ if __name__ == "__main__":
 				t.cost = tis.worst * t.items
 
 	if args.info:
-		print "# action taskid duration items",
 		for i,f in enumerate(lf):
-			print "#",args.logfile[i]
+			print "##",args.logfiles[i]
+			print "# action runtaskid duration items taskid"
 			for t in f:
-				if t.runaction.action == sched2run.Actions.TASK or t.runaction.action == sched2run.Actions.TASKPAR:
+				if t.runaction.action == sched2run.Actions.RUNTASK:
+					n = 1
+				elif t.runaction.action == sched2run.Actions.RUNTASKPAR:
 					n = t.runaction.params[1]-t.runaction.params[0]
 				else:
-					n = 0
-				print t.runaction.action,t.runaction.id,t.duration,n
+					continue
+				print t.runaction.action,t.runaction.id,t.duration,n,t.runaction.taskid
+
 
 	if args.stats:
-		print "taskid,runtaskid,worst,avg,samples"
+		print "# taskid,runtaskid,worst,avg,samples"
 		for v in ts.values():
 			print v.taskid,v.runtaskid,v.worst,v.average,v.samples
-		
+
 	if args.update:
 		if args.outgraph == "-":
 			e = os.path.splitext(args.graph)[1]
