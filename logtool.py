@@ -1,6 +1,8 @@
 import sched
 import sched2run
 import os
+
+
 #graph (dot or json) with taskid
 
 
@@ -97,6 +99,8 @@ def makestats(lf):
 				
 if __name__ == "__main__":
 	import argparse
+	sched.makenumbers = float
+
 
 	parser = argparse.ArgumentParser(description='Process log files of Task Runner')
 	parser.add_argument("logfiles",nargs="+",help="list of log files to be used")
@@ -105,6 +109,7 @@ if __name__ == "__main__":
 	parser.add_argument("--info",action="store_true",help="details of log")
 	parser.add_argument("--stats",action="store_true",help="compute task stat from logs")
 	parser.add_argument("--update",action="store_true",help="update graph from stats")
+	parser.add_argument("--compare",action="store_true",help="compare times from logs with graph times")
 	parser.add_argument("--outgraph",help="output graph",default="-")
 	args = parser.parse_args()
 
@@ -122,26 +127,34 @@ if __name__ == "__main__":
 	else:
 		gg = None
 
-	if args.stats or args.update:
+	if args.stats or args.update or args.compare:
 		ts = makestats(lf)
 	else:
 		ts = {}
 
-	if args.update:
+	if args.update or args.compare:
 		if gg is None:
-			print "graph needed for update"
+			print "graph needed for update and compare"
 			sys.exit(-1)
-		for t in gg:
-			tis = ts.get(t.id)
-			if tis is None:
-				print "no stats for task",t.id
-			else:
-				t.cost = tis.worst * t.items
+		if args.update:
+			for t in gg:
+				tis = ts.get(t.id)
+				if tis is None:
+					print "no stats for task",t.id
+				else:
+					t.cost = tis.worst * t.items
+		if args.compare:
+			print "# runtaskid originalcost worst avg samples taskid"
+			for t in gg:
+				v = ts.get(t.id)
+				if tis is None:
+					print "#no stats for task",t.id
+				print v.runtaskid,t.cost,v.worst,v.average,v.samples,v.taskid
 
 	if args.info:
 		for i,f in enumerate(lf):
 			print "##",args.logfiles[i]
-			print "# action runtaskid duration items taskid"
+			print "# runtaskid action duration items taskid"
 			for t in f:
 				if t.runaction.action == sched2run.Actions.RUNTASK:
 					n = 1
@@ -149,11 +162,11 @@ if __name__ == "__main__":
 					n = t.runaction.params[1]-t.runaction.params[0]
 				else:
 					continue
-				print t.runaction.action,t.runaction.id,t.duration,n,t.runaction.taskid
+				print t.runaction.id,t.runaction.action,t.duration,n,t.runaction.taskid
 
 
 	if args.stats:
-		print "# taskid,runtaskid,worst,avg,samples"
+		print "# taskid runtaskid worst avg samples"
 		for v in ts.values():
 			print v.taskid,v.runtaskid,v.worst,v.average,v.samples
 
