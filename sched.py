@@ -54,7 +54,7 @@ class MTaskEdge:
 class MTask:
     deadlinemaxtime = 10000000
     """M-Task"""
-    def __init__(self,id,cost,items,maxnp,deadline=deadlinemaxtime,reductioncost=0):
+    def __init__(self,id,cost,items,maxnp,deadline=deadlinemaxtime,reductioncost=0,evennp=False):
         self.id = id       # identifier
         self.parents = [] # inputs as MTaskEdge
         self.items = items
@@ -65,6 +65,7 @@ class MTask:
         self.deadline = makenumbers(deadline)
         self.reductioncost = reductioncost
         self.doesreduction = False
+        self.evennp = evennp
 
         # Computed FIXED propertirs
         self.sparents = set()  # tasks in parents
@@ -391,10 +392,20 @@ def cpr(tasks,numCores,args):
         while len(chi) > 0:   # PAPER: until T modified or chi empty
             index, max_value_ignored = max(enumerate([t.top+t.bottom for t in chi]), key=operator.itemgetter(1))
             t = chi[index]
-            if t.Np == t.maxnp: #saturated
+            n = t.Np
+            if t.evennp:
+                # 1,2,... all even
+                if t.Np == 1:
+                    n = 2
+                else:
+                    n = t.Np + 2 
+            else:
+                n = t.Np+1
+            if n > t.maxnp: #saturated
                 del chi[index]
             else:
-                t.updateNp(t.Np+1)
+                oldn = t.Np
+                t.updateNp(n)
                 # try distribution using given unmber of cores for given processor
                 Ti,tai = MLS(tasks,numCores,args)
                 #print "tried upgrade of ",t.id," with ",t.Np," obtaining ",Ti,"vs previous",T
@@ -404,7 +415,7 @@ def cpr(tasks,numCores,args):
                     Tchanged = True
                 else:
                     # failed
-                    t.updateNp(t.Np-1)
+                    t.updateNp(oldn)
                     del chi[index]
     # remove processors
     ta = [p for p in ta if len(p.tasks) > 0]
@@ -483,6 +494,8 @@ def savetasksjson(tasks,fp):
             oti["deadline"] = t.deadline
         if t.reductioncost != 0:
             oti["reductioncost"] = t.reductioncost
+        if t.evennp:
+            oti["evennp"] = True
         for p in t.parents:
             if p.delay == 0 and not p.isreduction:
                 oti["inputs"].append(p.source.id)
@@ -518,7 +531,7 @@ def loadtasksjson(fp):
             alli[ta["id"]] = ta
 
     for id,ta in alli.iteritems():
-        t = MTask(id,ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime),ta.get("reductioncost",0))
+        t = MTask(id,ta.get("cost",1),ta.get("items",1),ta.get("maxnp",defaultcore),ta.get("deadline",MTask.deadlinemaxtime),ta.get("reductioncost",0),evennp=ta.get("evennp"))
         ts.append(t)
         td[t.id] = t
 
@@ -544,6 +557,8 @@ def savetasksdot(tasks,fp):
             n.set("deadline",t.deadline)
         if t.reductioncost != 0:
             n.set("reductioncost",t.reductioncost)
+        if t.evennp:
+            n.set("evennp",1)
         g.add_node(n)
     for t in tasks:
         for te in t.parents:
@@ -565,7 +580,7 @@ def loadtasksdot(fp):
     for n in g2.get_nodes():   
         ad =      n.get_attributes()
         #print n.get_name(),[a for a in ad]
-        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("items",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",MTask.deadlinemaxtime)),float(ad.get("reductioncost",0)))
+        t = MTask(n.get_name(),float(ad.get("cost",1)),int(ad.get("items",1)),int(ad.get("maxnp",defaultcore)),int(ad.get("deadline",MTask.deadlinemaxtime)),float(ad.get("reductioncost",0)),int(ad.get("evennp",0)) != 0)
         tasks.append(t)
         tasksd[t.id] = t
     # if present use the attribute cost
