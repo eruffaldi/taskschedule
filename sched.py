@@ -527,7 +527,7 @@ def loadtasksjson(fp):
         for id,ta in j.iteritems():
             alli[id] = ta
     else:
-        for ta in j.iteritems():
+        for ta in j:
             alli[ta["id"]] = ta
 
     for id,ta in alli.iteritems():
@@ -537,8 +537,9 @@ def loadtasksjson(fp):
 
     # edges solved to objects (second pass)
     for id,ta in alli.iteritems():
-        me = ts[id]
-        ts[id].parents = [makedge(td[x],me) for x in ta["inputs"]]
+        if "inputs" in ta:
+            me = td[id]
+            me.parents = [makedge(td[x],me) for x in ta["inputs"]]
 
     return ts
 
