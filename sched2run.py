@@ -120,24 +120,42 @@ def sched2run(schedule,tasks,verbose=False):
 	# notificatio is on end
 	#
 	tasksembegin = {}
+	tasksemend = defaultdict(list)
 	#tasksemnotify = defaultdict(set)
 	for t in tasks:
-		if len(t.proc) == 1: # one single processo allocation
-			thisproc = list(t.proc)[0].proc
-			# assume no need
-			needed = False
-			# check if all parents are single-proc in the same proc of this
-			for tp in t.parents:
-				if len(tp.source.proc) > 1 or list(tp.source.proc)[0].proc != thisproc:
-					print "needed ",t.id," waiting ",tp.source.id
-					needed = True 
-					break
+		if len(t.proc) == 1:
+			thisproc = list(t.proc)[0].proc 
 		else:
-			needed = True # always needed
-		if needed:
+			thisproc = None # no affinity if multiple
+
+		# we'll pick the last
+		actionproc = defaultdict(list)
+		for tp in t.parents:			
+			allproc = set([p for p in tp.source.proc])
+			if thisproc in allproc:
+				count += len(allproc)-1
+			else:
+				count += len(allproc)	
+
+			for p in allproc:
+				if p != thisproc:
+					actionproc[p].append(tp.source)
+
+ 		count = len(actionproc)
+
+		if count > 0:
 			si = len(sems)
-			sems.append(len(t.proc)) # initialization number
+			sems.append(count) # initialization number
 			tasksembegin[t.id] = si
+
+			# for all processors
+			for k,v in actionproc.iteritems():			
+				v.sort(key=lambda x:x.endtime)
+				last = v[-1]
+				tasksemend[last.id].append((t,si))
+
+
+			# we need to tell which specific task has an end notify
 
 	for index,p in enumerate(schedule):
 		ss = []
@@ -159,11 +177,10 @@ def sched2run(schedule,tasks,verbose=False):
 				ss.append(makeRUNTASK(index,taskid2id[t.id]))				
 
 			# wait for ANY parent if they have an associated semaphore
-			for ct in t.children:
-				si = tasksembegin.get(ct.dest.id)
-				if si is not None:
-					ss.append(["#","taskid %s notifies sem %d of %s" % (t.id,si,ct.dest.id)])
-					ss.append(makeNOTIFY(index,si))
+			for ct,si in tasksemend[t.id]:
+				ss.append(["#","taskid %s notifies sem %d of %s" % (t.id,si,ct.id)])
+				ss.append(makeNOTIFY(index,si))
+
 		osched.append(ss)					
 
 	# add closings semaphore: emitted by each proc 1..n, wait by main
