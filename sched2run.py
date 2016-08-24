@@ -163,7 +163,7 @@ def sched2run(schedule,tasks,verbose=False):
 				si = tasksembegin.get(ct.dest.id)
 				if si is not None:
 					ss.append(["#","taskid %s notifies sem %d of %s" % (t.id,si,ct.dest.id)])
-					ss.append(makeWAIT(index,si))
+					ss.append(makeNOTIFY(index,si))
 		osched.append(ss)					
 
 	# add closings semaphore: emitted by each proc 1..n, wait by main
