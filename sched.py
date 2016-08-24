@@ -993,7 +993,7 @@ if __name__ == "__main__":
         drawsched(args.savepng or args.savesvg,r["schedule"],tasks)
     if args.saverun:
         import sched2run
-        oo = sched2run.sched2run(r["schedule"],r["tasks"])
+        oo = sched2run.sched2run(r["schedule"],r["tasks"],verbose=args.verbose)
         open(args.saverun,"wb").write("\n".join([" ".join([str(z) for z in y]) for y in oo]))
 
 

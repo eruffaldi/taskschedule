@@ -1,10 +1,10 @@
 import sched,math
-
+from collections import defaultdict
 def enum(*sequential, **named):
     enums = dict(zip(sequential, range(len(sequential))), **named)
     return type('Enum', (), enums)
 
-Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKPAR,WAIT,NOTIFY,SLEEP,NUMREDUCETARGET".split(",")))
+Actions = enum(*("NUMTHREADS,NUMSEMAPHORES,SEMAPHORE,NUMACTIONS,RUNTASK,RUNTASKPAR,WAIT,NOTIFY,SLEEP,NUMREDUCETARGET,COMMENT".split(",")))
 #action tid id p0 p1 p2 p3
 
 #NUMTHREADS p0
@@ -76,7 +76,7 @@ def makeSLEEP(tid,tms):
 	return [Actions.SLEEP,tid,0,tms,0,0]
 
 
-def sched2run(schedule,tasks):
+def sched2run(schedule,tasks,verbose=False):
 	implicitjoint = 0
 	o = []
 	o.append(["# op tid id p1 p2 p3"])
@@ -85,7 +85,7 @@ def sched2run(schedule,tasks):
 	taskid2id = dict()
 	sems = []
 	osched = []
-	tasksem = {}
+
 	for t in tasks:
 		if type(t.id) == int:
 			taskid2id[t.id] = t.id
@@ -101,36 +101,53 @@ def sched2run(schedule,tasks):
 
 	# emit task map for later association of id to task.id
 	for k,v in taskid2id.iteritems():
-		o.append(["#","task",v,k])
+		if str(v) != str(k):
+			o.append(["#","task",v,k])
 
 	o.append(makeTHREADS(len(schedule),implicitjoint))
 	
-	# compute semaphore of tasks by checking for AFFINITY
+	# enforce the fact that new TASK starts after parent tasks has been completed. We use a semaphore that is decremented
+	# and WHEN zero is reached all waiters are notified (notifyall)
+	#
+	# In our scheme each PARENT has a single WAIT task
+	# 
+	# compute need of semaphore. A new task WAIT for another IF
+	#	- source has multiple
+	#	- target has multiple
+	#	- source and target are in the different processors
+	#
+	# semaphore is on START
+	# notificatio is on end
+	#
+	tasksembegin = {}
+	#tasksemnotify = defaultdict(set)
 	for t in tasks:
-		if len(t.proc) == 1:
+		if len(t.proc) == 1: # one single processo allocation
 			thisproc = list(t.proc)[0].proc
 			# assume no need
 			needed = False
 			# check if all parents are single-proc in the same proc of this
 			for tp in t.parents:
 				if len(tp.source.proc) > 1 or list(tp.source.proc)[0].proc != thisproc:
+					print "needed ",t.id," waiting ",tp.source.id
 					needed = True 
+					break
 		else:
-			needed = True
+			needed = True # always needed
 		if needed:
 			si = len(sems)
-			sems.append(len(t.proc))
-			tasksem[t.id] = si
+			sems.append(len(t.proc)) # initialization number
+			tasksembegin[t.id] = si
 
 	for index,p in enumerate(schedule):
 		ss = []
 		for q in p.tasks:
 			t = q.task
-			# wait for ANY parent if they have an associated semaphore
-			for pt in t.parents:
-				si = tasksem.get(pt.source.id)
-				if si is not None:
-					ss.append(makeWAIT(index,si))
+
+			si = tasksembegin.get(t.id)
+			if si is not None:
+				ss.append(["#","taskid %s waits sem %d" % (t.id,si)])
+				ss.append(makeWAIT(index,si))
 
 			if t.items > 1:
 				# mapreduce or data-parallel in any case it runs 
@@ -141,10 +158,12 @@ def sched2run(schedule,tasks):
 			else:
 				ss.append(makeRUNTASK(index,taskid2id[t.id]))				
 
-			# notify if needed by THIS task instance
-			si = tasksem.get(t.id)
-			if si is not None:
-				ss.append(makeNOTIFY(index,si))
+			# wait for ANY parent if they have an associated semaphore
+			for ct in t.children:
+				si = tasksembegin.get(ct.dest.id)
+				if si is not None:
+					ss.append(["#","taskid %s notifies sem %d of %s" % (t.id,si,ct.dest.id)])
+					ss.append(makeWAIT(index,si))
 		osched.append(ss)					
 
 	# add closings semaphore: emitted by each proc 1..n, wait by main
