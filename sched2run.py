@@ -122,6 +122,9 @@ def sched2run(schedule,tasks,verbose=False):
 	tasksembegin = {}
 	tasksemend = defaultdict(list)
 	#tasksemnotify = defaultdict(set)
+
+	#TODO missing: we handle transitive inside the same processor, BUT NOT in different processors
+
 	for t in tasks:
 		if len(t.proc) == 1:
 			thisproc = list(t.proc)[0].proc 

@@ -372,7 +372,8 @@ def MLS(tasks,numCores,args):
     index, max_next = max(enumerate(proco),key=lambda p: p[1].next)
     return max_next.next,proco
 
-def cpr(tasks,numCores,args):
+#ftp://ftp.keldysh.ru/K_student/AUTO_PARALLELIZATION/TASK/a-low-cost-approach.pdf
+def cpa(tasks,numCores,args):
     """Computes using CPR"""
     # clean assignments
     for t in tasks:
@@ -386,10 +387,16 @@ def cpr(tasks,numCores,args):
         return dict(schedule=[],T=0)
 
 
-    while Tchanged: # not modified
+    while Tchanged: 
         Tchanged = False
-        chi = [t for t in tasks if t.Np < numCores] # modifiable set
-        while len(chi) > 0:   # PAPER: until T modified or chi empty
+        chi = [t for t in tasks if t.Np < min(this.maxnp,numCores)]
+        #TCP = max TB(v)
+        #TA = 1/P sum Tcost(v,Np(v))*Np(v)
+        while TCP > TA:
+            # optimal t in CP with Tc(t,Np(t))/Np-Tc(t,Np(t)+1)/(Np+1)
+            #   this is a t in CP that maximizes the gain
+            # schedule anyway
+            # update TL TB
             index, max_value_ignored = max(enumerate([t.top+t.bottom for t in chi]), key=operator.itemgetter(1))
             t = chi[index]
             n = t.Np
@@ -413,6 +420,62 @@ def cpr(tasks,numCores,args):
                     T = Ti
                     ta = tai
                     Tchanged = True
+                    # TODO update TA
+                    # TODO update TB and TL => new critical path => new TCP
+                else:
+                    # failed
+                    t.updateNp(oldn)
+                    del chi[index]
+    # remove processors
+    ta = [p for p in ta if len(p.tasks) > 0]
+    recomputetaskproc(ta,tasks)
+    return dict(schedule=ta,T=T)
+
+def cpr(tasks,numCores,args):
+    """Computes using CPR"""
+    # clean assignments
+    for t in tasks:
+        t.updateNp(1)
+
+    # build the ready pq using bottom (can be also earliest starting tiem)
+    T,ta = MLS(tasks,numCores,args)
+    Tchanged = True
+
+    if T is None:
+        return dict(schedule=[],T=0)
+
+
+    # CPR restarts the LOOP when 
+    while Tchanged: # not modified
+        Tchanged = False
+        chi = [t for t in tasks if t.Np < min(t.maxnp,numCores)] # extensible processors
+        while len(chi) > 0: #and not Tchanged:    # PAPER says not Tchanged
+            # TODO: make this a priority queue
+            index, max_value_ignored = max(enumerate([t.top+t.bottom for t in chi]), key=operator.itemgetter(1))
+            t = chi[index]
+            n = t.Np
+            if t.evennp:
+                # 1,2,... all even
+                if t.Np == 1:
+                    n = 2
+                else:
+                    n = t.Np + 2 
+            else:
+                n = t.Np+1
+            if n > t.maxnp: #saturated
+                del chi[index]
+            else:
+                oldn = t.Np
+                t.updateNp(n)
+                # try distribution using given unmber of cores for given processor
+                Ti,tai = MLS(tasks,numCores,args)
+                #print "tried upgrade of ",t.id," with ",t.Np," obtaining ",Ti,"vs previous",T
+                if Ti is not None and Ti < T:     # NOTE: None < x for any x != None           
+                    T = Ti
+                    ta = tai
+                    Tchanged = True
+
+                    # TODO update TB and TL
                 else:
                     # failed
                     t.updateNp(oldn)
@@ -910,7 +973,7 @@ if __name__ == "__main__":
 
     import argparse
     parser = argparse.ArgumentParser(description='Task Scheduling for Multiprocessor - Emanuele Ruffaldi 2016 SSSA')
-    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none pulp')
+    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none pulp cpa')
     parser.add_argument('input',help="input file")  
     parser.add_argument('--cores',type=int,default=4,help="number of cores for the scheduling")
     parser.add_argument('--verbose',action="store_true")
@@ -954,6 +1017,8 @@ if __name__ == "__main__":
             print t
     if args.algorithm == "cpr":
         r = cpr(tasks,args.cores,args)  
+    elif args.algorithm == "cpa":
+        r = cpa(tasks,args.cores,args)  
     elif args.algorithm == "pulp":
         r = xpulp(tasks,args.cores,args)  
     elif args.algorithm == "none":
