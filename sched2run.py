@@ -76,7 +76,7 @@ def makeSLEEP(tid,tms):
 	return [Actions.SLEEP,tid,0,tms,0,0]
 
 
-def sched2run(schedule,tasks,verbose=False):
+def sched2run(args,schedule,tasks,verbose=False):
 	implicitjoint = 0
 	o = []
 	o.append(["# op tid id p1 p2 p3"])
@@ -85,8 +85,14 @@ def sched2run(schedule,tasks,verbose=False):
 	taskid2id = dict()
 	sems = []
 	osched = []
+	ancestors = dict()
 
 	for t in tasks:
+		q = set()
+		for pa in t.parents:
+			q = q | ancestors[pa.source.id]
+			q.add(pa.source.id)
+		ancestors[t.id] = q
 		if type(t.id) == int:
 			taskid2id[t.id] = t.id
 
@@ -133,8 +139,18 @@ def sched2run(schedule,tasks,verbose=False):
 
 		# we'll pick the last
 		actionproc = defaultdict(list)
-		for tp in t.parents:			
-			allproc = set([p for p in tp.source.proc])
+		
+		# ancestors of parents
+		qall = set()
+		if not args.keepancestorsinrun:
+			for pa in t.parents:
+				qall = qall | ancestors[pa.source.id]
+
+		for tp in t.parents:
+			if tp.source.id in qall:
+				print "ignored"
+				continue	
+			allproc = set([p.proc for p in tp.source.proc])
 			if thisproc in allproc:
 				count += len(allproc)-1
 			else:
@@ -167,6 +183,7 @@ def sched2run(schedule,tasks,verbose=False):
 
 			si = tasksembegin.get(t.id)
 			if si is not None:
+				print "taskid %s waits sem %d" % (t.id,si)
 				ss.append(["#","taskid %s waits sem %d" % (t.id,si)])
 				ss.append(makeWAIT(index,si))
 
@@ -181,6 +198,7 @@ def sched2run(schedule,tasks,verbose=False):
 
 			# wait for ANY parent if they have an associated semaphore
 			for ct,si in tasksemend[t.id]:
+				#print "taskid %s notifies sem %d of %s" % (t.id,si,ct.id)
 				ss.append(["#","taskid %s notifies sem %d of %s" % (t.id,si,ct.id)])
 				ss.append(makeNOTIFY(index,si))
 
@@ -205,7 +223,7 @@ def sched2run(schedule,tasks,verbose=False):
 	# emit the execution
 	for p in osched:
 		o.extend(p)
-	return o
+	return dict(commands=o,sembegin=tasksembegin,semcount=sems,ncommands=len([x for x in o if x[0] != "#"]))
 
 if __name__ == '__main__':
 	import sys

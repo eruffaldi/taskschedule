@@ -667,7 +667,7 @@ def loadtasksdot(fp):
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
 
-def drawsched(name,schedule,tasks):
+def drawsched(name,schedule,tasks,sembegin,semcount):
     # draw the make span horizontally (#proc < #tasks)
     import cairo
     nproc = len(schedule)
@@ -683,10 +683,10 @@ def drawsched(name,schedule,tasks):
     pymargin = 2
     pxmargin = 2
     fontsize = 12
-    height = (pheight+pymargin)*(nproc+1)
+    height = int((pheight+pymargin)*(nproc+1))
     # minimum (for text) should be 50 pixels
     if minspan != 0:
-        timescale = (maxtext*fontsize+20)/minspan
+        timescale = int((maxtext*fontsize+20)/minspan)
     else:
         timescale =1 
     timescale = max(timescale,1)
@@ -709,6 +709,8 @@ def drawsched(name,schedule,tasks):
     #print w
 
     py = pheight/2
+    taskbeginend = dict()
+    deps = []
     for p in schedule:
         for q in p.tasks:
             e = q.end
@@ -716,13 +718,13 @@ def drawsched(name,schedule,tasks):
             t = q.task
             if t.ucost == 0:
                 continue
-            durwidth = (e-b)*timescale
+            durwidth = float((e-b)*timescale)
             durwidth -= pxmargin
-            bx = b*timescale+pxmargin
+            bx = float(b*timescale+pxmargin)
             cr.rectangle(bx, py, durwidth, pheight)
             cr.set_source_rgb(0, 0, 0)
             cr.stroke_preserve()
-            cr.set_source_rgb(255, 255, 255)
+            cr.set_source_rgb(1.0, 1.0, 1.0)
             cr.fill()
             cr.set_source_rgb(0, 0, 0)
             s = str(t.id)
@@ -730,35 +732,58 @@ def drawsched(name,schedule,tasks):
             cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
             cr.show_text(s)
             # all processors to be waited except this processor
-            allp = _reduce(operator.or_,[set([q.proc for q in x.source.proc]) for x in t.parents],set())
-            allp = allp - set([p])
+            #allp = _reduce(operator.or_,[set([q.proc for q in x.source.proc]) for x in t.parents],set())
+            #allp = allp - set([p])
+            si = sembegin.get(t.id)
+            if si is None:
+                nsem = 0
+            else:
+                nsem = semcount[si]
 
             # nothing to be wait for
-            if len(allp) == 0:
+            if nsem == 0:
                 mode = 1
             # one single semafore
-            elif len(allp) == 1:
+            elif nsem == 1:
                 mode = 2
-                c = (255,255,0)
+                c = (1.0,1.0,0)
             # more than one
             else:
                 mode = 3
-                c = (255,0,0)
+                c = (1.0,0,0)
             if mode > 1:
                 cr.rectangle(bx, py+pheight/2-pheight/8.0, pheight/4.0,pheight/4.0)
                 cr.set_source_rgb(0, 0, 0)
                 cr.stroke_preserve()
                 cr.set_source_rgb(*c)
                 cr.fill()
+
+            taskbeginend[t.id] = (bx,bx+durwidth,py+pheight/2) # startx,endx,centerheight
             if t.deadline < MTask.deadlinemaxtime and t.lateststart > t.deadline:
                 cr.arc(bx+pheight/8.0, py+pheight/8.0, pheight/8.0,0,2*math.pi)
                 cr.set_source_rgb(0, 0, 0)
                 cr.stroke_preserve()
-                cr.set_source_rgb(255,0,0)
+                cr.set_source_rgb(1.0,0,0)
                 cr.fill()
-
-
+            if args.drawedges:
+                for pa in t.parents:
+                    deps.append((pa.source,t))
         py += pheight+pymargin
+    if len(deps) > 0:
+        print "generating deps"
+    cr.set_line_width (0.5)
+    cr.set_source_rgb(0,0.0,0.0)
+    for source,target in deps:
+        psource = taskbeginend.get(source.id)
+        ptarget = taskbeginend.get(target.id)
+        if psource is None:
+            print "missing source",source
+            continue
+        # exclude same processor
+        if(psource[2] != ptarget[2]):
+            cr.move_to(psource[1],psource[2])
+            cr.line_to(ptarget[0],ptarget[2])
+        cr.stroke()
     if not svgmode:
         surface.write_to_png (name) # Output to PNG
 
@@ -985,11 +1010,13 @@ if __name__ == "__main__":
     #parser.add_argument('--transitive',action="store_true",help="transitive reduction")
     #parser.add_argument('--nextproc',action="store_true",help="uses just the next available proc")
     parser.add_argument('--output',help="JSON output of scheduling")
+    parser.add_argument('--drawedges',help="emit edges in the schedule savepng/savesvg",action="store_true")
     parser.add_argument('--savejson',help="emit JSON of the input graph")
     parser.add_argument('--savedot',help="emit DOT of the input graph")
     parser.add_argument('--savepng',help="emit PNG")
     parser.add_argument('--savesvg',help="emit SVG")
     parser.add_argument('--saverun',help="emit RUN for taskrunner")
+    parser.add_argument('--keepancestorsinrun',help="ignore ancestor removal",action="store_true")
 
     args = parser.parse_args()
 
@@ -1055,10 +1082,14 @@ if __name__ == "__main__":
             fp = open(args.output,"wb")
         json.dump(j,fp,sort_keys=True,indent=4, separators=(',', ': '))
     if args.savepng or args.savesvg:
-        drawsched(args.savepng or args.savesvg,r["schedule"],tasks)
+        import sched2run
+        oo = sched2run.sched2run(args,r["schedule"],r["tasks"],verbose=args.verbose)
+        print "Commands %d - Semaphores %d - Notifies %d" % (oo["ncommands"],len(oo["semcount"]),sum(oo["semcount"]))
+        drawsched(args.savepng or args.savesvg,r["schedule"],tasks,oo["sembegin"],oo["semcount"])
     if args.saverun:
         import sched2run
-        oo = sched2run.sched2run(r["schedule"],r["tasks"],verbose=args.verbose)
-        open(args.saverun,"wb").write("\n".join([" ".join([str(z) for z in y]) for y in oo]))
+        oo = sched2run.sched2run(args,r["schedule"],r["tasks"],verbose=args.verbose)
+        print "Commands %d - Semaphores %d - Notifies %d" % (oo["ncommands"],len(oo["semcount"]),sum(oo["semcount"]))
+        open(args.saverun,"wb").write("\n".join([" ".join([str(z) for z in y]) for y in oo["commands"]]))
 
 
