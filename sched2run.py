@@ -87,6 +87,7 @@ def sched2run(args,schedule,tasks,verbose=False):
 	osched = []
 	ancestors = dict()
 
+	# build the ancestors of a node, being it a topologically sorted it is fine
 	for t in tasks:
 		q = set()
 		for pa in t.parents:
@@ -132,6 +133,7 @@ def sched2run(args,schedule,tasks,verbose=False):
 	#TODO missing: we handle transitive inside the same processor, BUT NOT in different processors
 
 	for t in tasks:
+		# extract the single processor
 		if len(t.proc) == 1:
 			thisproc = list(t.proc)[0].proc 
 		else:
@@ -140,41 +142,45 @@ def sched2run(args,schedule,tasks,verbose=False):
 		# we'll pick the last
 		actionproc = defaultdict(list)
 		
-		# ancestors of parents
-		qall = set()
+		# if we wait for parent we assume waiting for all the ancestors
 		if not args.keepancestorsinrun:
-			for pa in t.parents:
-				qall = qall | ancestors[pa.source.id]
+			qall = ancestors[t.id] - [p.source.id for p in t.parents]
+		else:
+			qall = set()
 
 		for tp in t.parents:
+			# if the parent is an ancestor of another parent it has been already processed
 			if tp.source.id in qall:
-				print "ignored"
+				print "ignored",tp.id,"parent of",t.id,"due to ancestor"
 				continue	
-			allproc = set([p.proc for p in tp.source.proc])
+			# processors of parent
+			allproc = tp.source.allproc()
+
+			# this parent accounts for all its allocated processors except if we are from the same
 			if thisproc in allproc:
 				count += len(allproc)-1
+				for p in allproc:
+					if p != thisproc:
+						actionproc[p].append(tp.source)
 			else:
 				count += len(allproc)	
-
-			for p in allproc:
-				if p != thisproc:
+				for p in allproc:
 					actionproc[p].append(tp.source)
 
  		count = len(actionproc)
 
+ 		# if we have to wait SOME processor then count is not zero
 		if count > 0:
+			# new semaphorses
 			si = len(sems)
 			sems.append(count) # initialization number
-			tasksembegin[t.id] = si
+			tasksembegin[t.id] = si # for EMITTING wait
 
-			# for all processors
+			# for all the task last in the processors append a NOTIFY
 			for k,v in actionproc.iteritems():			
-				v.sort(key=lambda x:x.endtime)
-				last = v[-1]
-				tasksemend[last.id].append((t,si))
-
-
-			# we need to tell which specific task has an end notify
+				v.sort(key=lambda x:x.endtime) # sorted by end-time
+				last = v[-1]  # last of given processor
+				tasksemend[last.id].append((t,si)) # notify to task t and semaphore si
 
 	for index,p in enumerate(schedule):
 		ss = []

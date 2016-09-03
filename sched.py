@@ -82,6 +82,9 @@ class MTask:
         self.proc = set() # processors used
         self.ucost = self.cost # self.cost/self.Np
         self.Np = 1         # effective number of processor (request) == len(self.proc)
+    def allproc(self):
+		return set([p.proc for p in self.proc])
+		
     def __repr__(self):
         return "MTask %s cost=%s top=%s bottom=%s slevel=%d items=%d maxnp=%d early/late=%s %s deadline/c=%s %s parents=%s children=%s" % (self.id,str(self.cost),self.top,self.bottom,self.slevel,self.items,self.maxnp,self.earlieststart,self.lateststart,self.deadline,self.cdeadline,[t.id for t in self.sparents],[t.dest.id for t in self.children])
     def updateNp(self,n):
@@ -193,10 +196,10 @@ make the results deterministic)."""
 # sorts tasks topologically
 def toposorttasks(data,sort=True):
     qd = dict([(t.id,t) for t in data]) # build the dictionary for reconstruction
-    q = dict([(t.id,set([p.id for p in t.sparents])) for t in data]) # build dependency as list of id
+    q = dict([(t.id,set([p.source.id for p in t.parents])) for t in data]) # build dependency as list of id
 
     # back from id tho objects list
-    return [qd[i] for i in toposort_flatten(q,sort=sort)]
+    return [qd[tid] for tid in toposort_flatten(q,sort=sort)]
 
 def recomputetaskproc(schedule,tasks):
     """Recomputes some values per-task after the approval of a schedule"""
@@ -1023,10 +1026,7 @@ if __name__ == "__main__":
     if args.usefloats or args.algorithm == "pulp":
         makenumbers = float
 
-    if args.input.endswith(".json"):
-        tasks = loadtasksjson(open(args.input,"rb"))
-    else:
-        tasks = loadtasksdot(open(args.input,"rb"))
+    tasks = loadtasks(args.input)
 
     if args.savejson:
         savetasksjson(tasks,args.savejson == "-" and sys.stdout or open(args.savejson,"wb"))
@@ -1034,9 +1034,7 @@ if __name__ == "__main__":
     if args.savedot:
         savetasksdot(tasks,args.savedot == "-" and sys.stdout or open(args.savedot,"wb"))
         sys.exit(0)
-    # topological sort
-    tasks = toposorttasks(tasks)
-
+        print "\n".join([str(x.id) for x in tasks])
     # update structures and compute 
     annotatetasks(tasks)
     if args.verbose:

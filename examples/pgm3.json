@@ -1,0 +1,277 @@
+{
+   "tasks" : [
+      {
+         "cost" : 9,
+         "id" : 1,
+         "messages" : [ "from 14 to 28" ]
+      },
+      {
+         "cost" : 9,
+         "id" : 2,
+         "messages" : [ "from 13 to 27" ]
+      },
+      {
+         "cost" : 9,
+         "id" : 3,
+         "messages" : [ "from 12 to 26" ]
+      },
+      {
+         "cost" : 9,
+         "id" : 4,
+         "messages" : [ "from 8 to 22" ]
+      },
+      {
+         "cost" : 18,
+         "id" : 5,
+         "messages" : [ "from 8 to 30" ]
+      },
+      {
+         "cost" : 9,
+         "id" : 6,
+         "messages" : [ "from 9 to 23" ]
+      },
+      {
+         "cost" : 9,
+         "id" : 7,
+         "messages" : [ "from 10 to 24" ]
+      },
+      {
+         "cost" : 9,
+         "id" : 8,
+         "messages" : [ "from 11 to 25" ]
+      },
+      {
+         "cost" : 19,
+         "id" : 9,
+         "inputs" : [ 5 ],
+         "messages" : [ "from 30 to 15" ]
+      },
+      {
+         "cost" : 4,
+         "id" : 10,
+         "messages" : [ "from 29 to 1" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 11,
+         "inputs" : [ 1 ],
+         "messages" : [ "from 28 to 7" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 12,
+         "inputs" : [ 2 ],
+         "messages" : [ "from 27 to 6" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 13,
+         "inputs" : [ 3 ],
+         "messages" : [ "from 26 to 5" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 14,
+         "inputs" : [ 8 ],
+         "messages" : [ "from 25 to 4" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 15,
+         "inputs" : [ 7 ],
+         "messages" : [ "from 24 to 3" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 16,
+         "inputs" : [ 4 ],
+         "messages" : [ "from 22 to 1" ]
+      },
+      {
+         "cost" : 8,
+         "id" : 17,
+         "inputs" : [ 6 ],
+         "messages" : [ "from 23 to 2" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 18,
+         "inputs" : [ 11 ],
+         "messages" : [ "from 7 to 21" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 19,
+         "inputs" : [ 42 ],
+         "messages" : [ "from 1 to 16" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 20,
+         "inputs" : [ 18 ],
+         "messages" : [ "from 21 to 6" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 21,
+         "inputs" : [ 19 ],
+         "messages" : [ "from 16 to 2" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 22,
+         "inputs" : [ 43 ],
+         "messages" : [ "from 6 to 20" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 23,
+         "inputs" : [ 44 ],
+         "messages" : [ "from 2 to 17" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 24,
+         "inputs" : [ 22 ],
+         "messages" : [ "from 20 to 5" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 25,
+         "inputs" : [ 23 ],
+         "messages" : [ "from 17 to 3" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 26,
+         "inputs" : [ 45 ],
+         "messages" : [ "from 5 to 19" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 27,
+         "inputs" : [ 46 ],
+         "messages" : [ "from 3 to 18" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 28,
+         "inputs" : [ 26 ],
+         "messages" : [ "from 19 to 4" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 29,
+         "inputs" : [ 27 ],
+         "messages" : [ "from 18 to 4" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 30,
+         "inputs" : [ 47 ],
+         "messages" : [ "from 4 to 18" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 31,
+         "inputs" : [ 47 ],
+         "messages" : [ "from 4 to 19" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 32,
+         "inputs" : [ 27, 30 ],
+         "messages" : [ "from 18 to 3" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 33,
+         "inputs" : [ 26, 31 ],
+         "messages" : [ "from 19 to 5" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 34,
+         "inputs" : [ 32, 46 ],
+         "messages" : [ "from 3 to 17" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 35,
+         "inputs" : [ 33, 45 ],
+         "messages" : [ "from 5 to 20" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 36,
+         "inputs" : [ 23, 34 ],
+         "messages" : [ "from 17 to 2" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 37,
+         "inputs" : [ 22, 35 ],
+         "messages" : [ "from 20 to 6" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 38,
+         "inputs" : [ 36, 44 ],
+         "messages" : [ "from 2 to 16" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 39,
+         "inputs" : [ 37, 43 ],
+         "messages" : [ "from 6 to 21" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 40,
+         "inputs" : [ 19, 38 ],
+         "messages" : [ "from 16 to 1" ]
+      },
+      {
+         "cost" : 6,
+         "id" : 41,
+         "inputs" : [ 18, 39 ],
+         "messages" : [ "from 21 to 7" ]
+      },
+      {
+         "cost" : 12,
+         "id" : 42,
+         "inputs" : [ 10, 16 ],
+         "messages" : [ "from 29 to 1", "from 22 to 1" ]
+      },
+      {
+         "cost" : 14,
+         "id" : 43,
+         "inputs" : [ 12, 20 ],
+         "messages" : [ "from 27 to 6", "from 21 to 6" ]
+      },
+      {
+         "cost" : 14,
+         "id" : 44,
+         "inputs" : [ 17, 21 ],
+         "messages" : [ "from 23 to 2", "from 16 to 2" ]
+      },
+      {
+         "cost" : 14,
+         "id" : 45,
+         "inputs" : [ 13, 24 ],
+         "messages" : [ "from 26 to 5", "from 20 to 5" ]
+      },
+      {
+         "cost" : 14,
+         "id" : 46,
+         "inputs" : [ 15, 25 ],
+         "messages" : [ "from 24 to 3", "from 17 to 3" ]
+      },
+      {
+         "cost" : 20,
+         "id" : 47,
+         "inputs" : [ 14, 28, 29 ],
+         "messages" : [ "from 25 to 4", "from 19 to 4", "from 18 to 4" ]
+      }
+   ]
+}
