@@ -1,14 +1,38 @@
 import json
 
+class Task:
+	def __init__(self,name,role,message):
+		self.name = ""
+		self.role = "" # aggregate messages, message, belief, observation
+		self.factor = None
+		self.message = None
+		self.parents = []
+		self.children = []
+	def addchild(self,t):
+		self.children.append(t)
+		t.parents.append(self)
+	def addparent(self,t):
+		t.addchild(self)
+	def __repr__(self):
+		return "Task(%s,%s,#p%d,#c%d)" % (self.name,self.action,len(self.parents),len(self.children))
+
 class Domain:
 	def __init__(self,name,values):
 		self.name = name
 		self.values = values
 
-class VariableNode:
-	def __init__(self,name,id,role,xtype):
+class Node:
+	def __init__(self,name,id):
 		self.name = name
 		self.id = id
+		#for scheduling
+		self.seenout = False
+		self.seenouttask = None
+		self.received = []
+
+class VariableNode(Node):
+	def __init__(self,name,id,role,xtype):
+		Node.__init__(self,name,id)
 		self.role = role
 		self.xtype = xtype
 		self.domain = None
@@ -20,17 +44,15 @@ class VariableNode:
 	def __repr__(self):
 		return "VariableNode(%s,%s,dim=%d)" % (self.name,self.xtype,self.dim)
 
-class FactorNode:
+class FactorNode(Node):
 	def __init__(self,name,id,xtype):
-		self.name = name
-		self.id = id
+		Node.__init__(self,name,id)
 		self.xtype = xtype
 		self.vars = []
 		self.dvars = []
 		self.gvars = []
 		self.ddim = 0
 		self.gdim = 0
-
 	def inmessagetype(other):
 		# always as the variable connected 
 		return other.inmessagetype()
@@ -109,3 +131,31 @@ if __name__ == "__main__":
 		print a,"->",b
 	print q.vars
 	print q.facs
+
+	tasks = []
+	for src,dst in q.sched:
+		t = Task("","message",(src,dst))
+		if not src.seenout:
+			# this is the first output of the factor, if it has received message we need to create the seenout task
+			# that collects 
+			if len(src.received) == 0:
+				# no need to create seenout
+				pass
+			else:
+				tt = Task("","collect",dst)
+				tasks.append(t)
+				for q in src.received:
+					tt.addparent(q)
+				src.seenouttask = tt
+			src.seenout = True
+		else:
+			dst.received.append(t)
+		if src.seenouttask is not None:
+			t.addparent(src.seenouttask)
+		tasks.append(t)
+
+	#sort topologically
+	for q in tasks:
+		print q.name,q.role,q.message,"parents:",[x.name for x in q.parents]
+
+
