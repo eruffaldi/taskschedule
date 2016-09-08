@@ -2,10 +2,10 @@ import json
 
 class Task:
 	def __init__(self,name,role,message):
-		self.name = ""
-		self.role = "" # aggregate messages, message, belief, observation
+		self.name = name
+		self.role = role # aggregate messages, message, belief, observation
 		self.factor = None
-		self.message = None
+		self.message = message
 		self.parents = []
 		self.children = []
 	def addchild(self,t):
@@ -42,7 +42,7 @@ class VariableNode(Node):
 		return (self.ddim,self.gdim)
 		# always same as node
 	def __repr__(self):
-		return "VariableNode(%s,%s,dim=%d)" % (self.name,self.xtype,self.dim)
+		return "VariableNode(%s,%s,dim=G%d/D%d)" % (self.name,self.xtype,self.gdim,self.ddim)
 
 class FactorNode(Node):
 	def __init__(self,name,id,xtype):
@@ -102,20 +102,20 @@ class Pgm:
 				g.dvars = [self.vars[x] for x in v["discreteVars"]]
 				g.gvars = [self.vars[x] for x in v["gaussianVars"]]
 				g.vars = g.dvars + g.gvars
-				g.gdim = sum([x.dim for x in g.gvars])
-				g.ddim = reduce(lambda x,y:x*y,[x.dim for x in g.dvars],1)
+				g.gdim = sum([x.gdim for x in g.gvars])
+				g.ddim = reduce(lambda x,y:x*y,[x.ddim for x in g.dvars],1)
 				pass
 			elif xtype == "discrete":
 				g.vars = [self.vars[x] for x in v["variables"]]
 				g.dvars = g.vars[:]
-				g.ddim = reduce(lambda x,y:x*y,[x.dim for x in g.vars],1)
+				g.ddim = reduce(lambda x,y:x*y,[x.ddim for x in g.vars],1)
 				g.gdim = 0
 				pass
 			elif xtype == "gaussian":
 				g.vars = [self.vars[x] for x in v["variables"]]
 				g.gvars = g.vars[:]
 				g.ddim = 0
-				g.gdim = sum([x.dim for x in g.vars])
+				g.gdim = sum([x.gdim for x in g.vars])
 				pass
 			self.facs[name] = g
 			self.nodeid[id] = g
@@ -134,15 +134,18 @@ if __name__ == "__main__":
 
 	tasks = []
 	for src,dst in q.sched:
-		t = Task("","message",(src,dst))
+		t = Task("%s->%s" % (src.name,dst.name),"message",(src,dst))
 		if not src.seenout:
 			# this is the first output of the factor, if it has received message we need to create the seenout task
 			# that collects 
 			if len(src.received) == 0:
 				# no need to create seenout
 				pass
+			elif len(src.received) == 1:
+				src.seenouttask = src.received[0]
 			else:
-				tt = Task("","collect",dst)
+				tt = Task("%s" % dst.name,"collect")
+				tt.factor = dst
 				tasks.append(t)
 				for q in src.received:
 					tt.addparent(q)
@@ -156,6 +159,10 @@ if __name__ == "__main__":
 
 	#sort topologically
 	for q in tasks:
-		print q.name,q.role,q.message,"parents:",[x.name for x in q.parents]
+		print q.name,q.role,
+		if len(q.parents) != 0:
+			print "parents:",[x.name for x in q.parents]
+		else:
+			print
 
 
