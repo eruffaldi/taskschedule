@@ -10,6 +10,8 @@ nodes start-time can be delayed without increasing the schedule length: http://c
 
 TODO: maybe static level = maximum path cost without the edge costs
 
+TODO: use NetworkX for transitive reduction http://www.boost.org/doc/libs/1_52_0/libs/graph/doc/transitive_closure.html
+TODO: use NetworkX for topological sort https://networkx.readthedocs.io/en/stable/reference/generated/networkx.algorithms.dag.topological_sort.html
 """
 import sys,math
 import heapq
@@ -857,14 +859,15 @@ def defmax(a,default):
 def loadsched(f):
     pass
 
-def loadtasks(f):
+def loadtasks(f,dotransitive=False):
     if f.endswith(".json"):
         tasks = loadtasksjson(open(f,"rb"))
     else:
         tasks = loadtasksdot(open(f,"rb"))
     tasks = toposorttasks(tasks)
     #OPTIONAL
-    transitivereduction(tasks,updatechildren=False)
+    if dotransitive:
+        transitivereduction(tasks,updatechildren=False)
     # update structures and compute 
     annotatetasks(tasks)
     return tasks
@@ -1045,6 +1048,7 @@ if __name__ == "__main__":
     parser.add_argument('--savedot',help="emit DOT of the input graph")
     parser.add_argument('--savepng',help="emit PNG")
     parser.add_argument('--savesvg',help="emit SVG")
+    parser.add_argument('--transitive',action="store_true",help="apply transitive closure removing dependency (GOOD only for some TASK models)")
     parser.add_argument('--saverun',help="emit RUN for taskrunner")
     parser.add_argument('--keepancestorsinrun',help="ignore ancestor removal",action="store_true")
 
@@ -1062,8 +1066,7 @@ if __name__ == "__main__":
         savetasksdot(tasks,args.savedot == "-" and sys.stdout or open(args.savedot,"wb"))
         sys.exit(0)
         print "\n".join([str(x.id) for x in tasks])
-    # update structures and compute 
-    annotatetasks(tasks)
+    
     if args.verbose:
         for t in tasks:
             print t
