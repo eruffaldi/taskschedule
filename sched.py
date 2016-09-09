@@ -670,14 +670,14 @@ def loadtasksdot(fp):
         #print e.get_source(),e.get_destination(),[a for a in e.get_attributes().iteritems()]
     return tasks
 
-def drawsched(name,schedule,tasks,sembegin,semcount):
+def drawsched(name,schedule,tasks,sembegin,semcount,nolabels):
     # draw the make span horizontally (#proc < #tasks)
     import cairo
     nproc = len(schedule)
     if nproc > 0:
         maxspan = max([x.next for x in schedule])
         minspan = min([len(p.tasks) > 0 and min([q.end-q.begin for q in p.tasks if q.task.ucost > 0])  or 100000000 for p in schedule])
-        maxtext = max([len(p.tasks) > 0 and max([len(str(q.task.id)) for q in p.tasks if q.task.ucost > 0]) or 0  for p in schedule])
+        maxtext = max([len(p.tasks) > 0 and max([nolabels and 1 or len(str(q.task.id)) for q in p.tasks if q.task.ucost > 0]) or 0  for p in schedule])
     else:
         maxspan = 0
         minspan = 0
@@ -730,10 +730,11 @@ def drawsched(name,schedule,tasks,sembegin,semcount):
             cr.set_source_rgb(1.0, 1.0, 1.0)
             cr.fill()
             cr.set_source_rgb(0, 0, 0)
-            s = str(t.id)
-            (x, y, w, h, dx, dy) = cr.text_extents(s)
-            cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
-            cr.show_text(s)
+            if not nolabels:
+                s = str(t.id)
+                (x, y, w, h, dx, dy) = cr.text_extents(s)
+                cr.move_to(bx+durwidth/2-w/2, py+pheight/2-h/2-y)
+                cr.show_text(s)
             # all processors to be waited except this processor
             #allp = _reduce(operator.or_,[set([q.proc for q in x.source.proc]) for x in t.parents],set())
             #allp = allp - set([p])
@@ -1005,6 +1006,7 @@ if __name__ == "__main__":
     parser.add_argument('input',help="input file")  
     parser.add_argument('--cores',type=int,default=4,help="number of cores for the scheduling")
     parser.add_argument('--verbose',action="store_true")
+    parser.add_argument('--nolabels',action="store_true")
     parser.add_argument('--earliest',action="store_true",help="uses earliest instead of bottom-level for the MLS")
     parser.add_argument('--usefloats',action="store_true",help="compute using floats instead of fractions")
     parser.add_argument('--usecompact',action="store_true",help="compact z constraint for pulp model")
@@ -1083,7 +1085,7 @@ if __name__ == "__main__":
         import sched2run
         oo = sched2run.sched2run(args,r["schedule"],r["tasks"],verbose=args.verbose)
         print "Commands %d - Semaphores %d - Notifies %d" % (oo["ncommands"],len(oo["semcount"]),sum(oo["semcount"]))
-        drawsched(args.savepng or args.savesvg,r["schedule"],tasks,oo["sembegin"],oo["semcount"])
+        drawsched(args.savepng or args.savesvg,r["schedule"],tasks,oo["sembegin"],oo["semcount"],args.nolabels)
     if args.saverun:
         import sched2run
         oo = sched2run.sched2run(args,r["schedule"],r["tasks"],verbose=args.verbose)

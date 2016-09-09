@@ -144,7 +144,7 @@ def sched2run(args,schedule,tasks,verbose=False):
 		
 		# if we wait for parent we assume waiting for all the ancestors
 		if not args.keepancestorsinrun:
-			qall = ancestors[t.id] - [p.source.id for p in t.parents]
+			qall = ancestors[t.id] - set([p.source.id for p in t.parents])
 		else:
 			qall = set()
 
