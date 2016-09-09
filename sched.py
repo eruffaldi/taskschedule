@@ -151,6 +151,29 @@ class Proc:
             return "Proc(%d) ends %s tasks:\n%s" % (self.index,self.next,"\n".join(["\t%-6s [%s %s, %d-%d %d]" % (q.task.id,q.begin,q.end,q.rangesplit[0],q.rangesplit[1],q.rangesplit[2]) for q in self.tasks]))
 
 
+def transitivereduction(tasks,updatechildren):
+    ancestors = dict()
+    # build the ancestors of a node, being it a topologically sorted it is fine
+    for t in tasks:
+        q = set()
+        for pa in t.parents:
+            q = q | ancestors[pa.source.id]
+            q.add(pa.source.id)
+        ancestors[t.id] = q
+        if updatechildren:
+            t.children = []
+
+    for t in tasks:
+        qall = reduce(lambda x,y: x|y,[ancestors[p.source.id] for p in t.parents],set()) # ancestors not parents
+        before = len(t.parents)
+        # remove a parent that is ancestor of some
+        t.parents = [p for p in t.parents if not p.source.id in qall]
+        if updatechildren:
+            for q in t.parents:
+                q.source.children.append(t)
+
+
+
 # Taken from: https://pypi.python.org/pypi/toposort/1.0
 def toposort(data):
     """Dependencies are expressed as a dictionary whose keys are items
@@ -840,6 +863,8 @@ def loadtasks(f):
     else:
         tasks = loadtasksdot(open(f,"rb"))
     tasks = toposorttasks(tasks)
+    #OPTIONAL
+    transitivereduction(tasks,updatechildren=False)
     # update structures and compute 
     annotatetasks(tasks)
     return tasks

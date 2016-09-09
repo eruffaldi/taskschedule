@@ -1,4 +1,60 @@
+#TODO observations
+#TODO paralel beliefs
 import json
+from collections import defaultdict
+from functools import reduce as _reduce
+
+
+# Taken from: https://pypi.python.org/pypi/toposort/1.0
+def toposort(data):
+    """Dependencies are expressed as a dictionary whose keys are items
+and whose values are a set of dependent items. Output is a list of
+sets in topological order. The first set consists of items with no
+dependences, each subsequent set consists of items that depend upon
+items in the preceeding sets.
+"""
+    # Special case empty input.
+    if len(data) == 0:
+        return
+
+    # Copy the input so as to leave it unmodified.
+    data = data.copy()
+
+    # Ignore self dependencies REMOVED
+
+    # Find all items that don't depend on anything.
+    extra_items_in_deps = _reduce(set.union, data.values())- set(data.keys())
+    # Add empty dependences where needed.
+    data.update({item:set() for item in extra_items_in_deps})
+    while True:
+        ordered = set(item for item, dep in data.items() if len(dep) == 0)
+        if not ordered:
+            break
+        yield ordered
+        data = {item: (dep - ordered)
+                for item, dep in data.items()
+                    if item not in ordered}
+    if len(data) != 0:
+        raise ValueError('Cyclic dependencies exist among these items: {}'.format(', '.join(repr(x) for x in data.items())))
+
+
+def toposort_flatten(data, sort=True):
+    """Returns a single list of dependencies. For any set returned by
+toposort(), those items are sorted and appended to the result (just to
+make the results deterministic)."""
+    result = []
+    for d in toposort(data):
+        result.extend((sorted if sort else list)(d))
+    return result
+
+# sorts tasks topologically
+def toposorttasks(data,sort=True):
+    qd = dict([(t.name,t) for t in data]) # build the dictionary for reconstruction
+    q = dict([(t.name,set([p.name for p in t.parents])) for t in data]) # build dependency as list of id
+
+    # back from id tho objects list
+    return [qd[tid] for tid in toposort_flatten(q,sort=sort)]
+
 
 class Task:
     def __init__(self,name,role,message):
@@ -7,12 +63,15 @@ class Task:
         self.factor = None
         self.message = message
         self.parents = []
+        self.schildren = set()
         self.children = []
         self.cost = 0
         self.items = 1
     def addchild(self,t):
-        self.children.append(t)
-        t.parents.append(self)
+        if not t in self.schildren:
+            self.children.append(t)
+            t.parents.append(self)
+            self.schildren.add(t)
     def addparent(self,t):
         t.addchild(self)
     def __repr__(self):
@@ -217,6 +276,27 @@ def emitdot(tasks,o):
         fp.write(g.to_string())
         fp.close()
 
+
+def transitivereduction(tasks):
+    ancestors = dict()
+    # build the ancestors of a node, being it a topologically sorted it is fine
+    for t in tasks:
+        q = set()
+        for pa in t.parents:
+            q = q | ancestors[pa.name]
+            q.add(pa.name)
+        ancestors[t.name] = q
+
+    for t in tasks:
+        qall = reduce(lambda x,y: x|y,[ancestors[p.name] for p in t.parents],set()) # ancestors not parents
+        print "node pure ancestors",t.name,len(qall)
+        before = len(t.parents)
+        # remove a parent that is ancestor of some
+        t.parents = [p for p in t.parents if not p.name in qall]
+        after = len(t.parents)
+        if before != after:
+            print "reduced",t.name,"of",before-after
+
 if __name__ == "__main__":
     import sys
     q = Pgm(sys.argv[1])
@@ -229,8 +309,12 @@ if __name__ == "__main__":
     print "TODO: cleanup some messages"
 
     tasks = []
+    lastof = defaultdict(list)
+    i = 0
     for src,dst in q.sched:
+        i = i + 1
         t = Task("","message",(src,dst))
+        t.index = i
         if src == dst:
             print "UNSUPPORTED NL SELF MESSAGE"
             break
@@ -262,13 +346,25 @@ if __name__ == "__main__":
         dst.received.append(t)
         if src.seenouttask is not None:
             # src is an post message
-            t.name = "%s(OUT)->%s" % (src.name,dst.name)
+            t.name = "%s(OUT)->%s #%d" % (src.name,dst.name,i)
             t.cost = src.costoutmessage(dst)
             t.addparent(src.seenouttask)
         else:
-            t.name = "%s->%s" % (src.name,dst.name)
+            t.name = "%s->%s #%d" % (src.name,dst.name,i)
             t.cost = dst.costinmessage(src)
+
+        # ADD ANY message that writes in dst except the 
+        for p in lastof[src]:
+            print "addlastof",dst.name,"for dst->src",src.name,"index",t.index,"using",p.index
+            t.addparent(p)
+
+        print "newlastof",dst.name,"with",t.index
+        lastof[dst].append(t)
         tasks.append(t)
+
+    toposorttasks(tasks)
+    transitivereduction(tasks)
+
 
     emitdot(tasks,"out.png")
     emitdotsched(tasks,"out.dot")
