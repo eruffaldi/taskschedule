@@ -287,6 +287,7 @@ def transitivereduction(tasks):
             q.add(pa.name)
         ancestors[t.name] = q
 
+    n = 0
     for t in tasks:
         qall = reduce(lambda x,y: x|y,[ancestors[p.name] for p in t.parents],set()) # ancestors not parents
         print "node pure ancestors",t.name,len(qall)
@@ -294,9 +295,10 @@ def transitivereduction(tasks):
         # remove a parent that is ancestor of some
         t.parents = [p for p in t.parents if not p.name in qall]
         after = len(t.parents)
+        n += before-after
         if before != after:
-            print "reduced",t.name,"of",before-after
-
+            print "reduced",t.name,"of",before-after    
+    return n
 if __name__ == "__main__":
     import sys
     q = Pgm(sys.argv[1])
@@ -333,6 +335,7 @@ if __name__ == "__main__":
                 print src.name,dst.name,"sends needs collecting",len(src.received)
                 tt = Task("%s" % src.name,"collect",None)
                 tt.factor = src
+                tt.index = t.index
                 tasks.append(tt)
                 First = True
                 for q in src.received:
@@ -349,22 +352,35 @@ if __name__ == "__main__":
             t.name = "%s(OUT)->%s #%d" % (src.name,dst.name,i)
             t.cost = src.costoutmessage(dst)
             t.addparent(src.seenouttask)
+            baseindex = src.seenouttask.index
         else:
             t.name = "%s->%s #%d" % (src.name,dst.name,i)
             t.cost = dst.costinmessage(src)
+            baseindex = 0
 
-        # ADD ANY message that writes in dst except the 
-        for p in lastof[src]:
-            print "addlastof",dst.name,"for dst->src",src.name,"index",t.index,"using",p.index
-            t.addparent(p)
+        # given PGM we can assume that ANY update BEFORE the first OUT can be IGNORED 
+        if baseindex == 0:
+            # all 
+            for p in lastof[src]:
+                print "addlastof",dst.name,"for dst->src",src.name,"index",t.index,"using",p.index
+                t.addparent(p)
+        else:
+            # only before the baseindex
+            for p in lastof[src][-1::-1]:
+                if p.index < baseindex:
+                    break
+                print "addlastof",dst.name,"for dst->src",src.name,"index",t.index,"using",p.index
+                t.addparent(p)
 
         print "newlastof",dst.name,"with",t.index
         lastof[dst].append(t)
         tasks.append(t)
 
     toposorttasks(tasks)
-    transitivereduction(tasks)
+    # NOTE: transitive reduction 
+    n = transitivereduction(tasks)
 
+    print "transitive reduction removed ",n
 
     emitdot(tasks,"out.png")
     emitdotsched(tasks,"out.dot")
