@@ -60,7 +60,7 @@ class Task:
     def __init__(self,name,role,message):
         self.name = name
         self.role = role # aggregate messages, message, belief, observation
-        self.factor = None
+        self.node = None
         self.message = message
         self.parents = []
         self.schildren = set()
@@ -121,6 +121,9 @@ class VariableNode(Node):
         self.domain = None
         self.ddim = 0
         self.gdim = 0
+        self.factors = [] 
+    def adjacent(self):
+        return self.factors
     def __repr__(self):
         return "VariableNode(%s,%s,dim=G%d/D%d)" % (self.name,self.xtype,self.gdim,self.ddim)
 
@@ -134,6 +137,8 @@ class FactorNode(Node):
         self.prior = False
         self.ddim = 0
         self.gdim = 0
+    def adjacent(self):
+        return self.vars
     def __repr__(self):
         return "FactorNode(%s,%s,dim=G%d/D%d)" % (self.name,self.xtype,self.gdim,self.ddim)
 
@@ -204,6 +209,8 @@ class Pgm:
                 g.ddim = 0
                 g.gdim = sum([x.gdim for x in g.vars])
                 pass
+            for v in g.vars:
+                v.factors.append(g)
             self.facs[name] = g
             self.nodeid[id] = g
     def loadsched(self,s):
@@ -311,8 +318,20 @@ if __name__ == "__main__":
     print "TODO: cleanup some messages"
 
     tasks = []
-    lastof = defaultdict(list)
-    i = 0
+    lastof = dict()
+    i = 1
+    # add observations with enforcement of sequentiality in factors
+    if False: # already done by schedule
+        for v in q.vars.values():        
+            if v.role == "observed":
+                for f in v.adjacent():
+                    t = Task("obs %s\nto %s" % (v.name,f.name),"observation",(v,f))
+                    t.index = 1
+                    w = lastof.get(f)
+                    if w: 
+                        t.addparent(w)
+                    lastof[f] = t
+                    tasks.append(t)
     for src,dst in q.sched:
         i = i + 1
         t = Task("","message",(src,dst))
@@ -334,47 +353,50 @@ if __name__ == "__main__":
             else:
                 print src.name,dst.name,"sends needs collecting",len(src.received)
                 tt = Task("%s" % src.name,"collect",None)
-                tt.factor = src
+                tt.node = src
                 tt.index = t.index
                 tasks.append(tt)
                 First = True
-                for q in src.received:
-                    tt.addparent(q)
+                for qq in src.received:
+                    tt.addparent(qq)
                     if not First:
-                        tt.cost += src.costaggregate(q.message[0]) 
+                        tt.cost += src.costaggregate(qq.message[0]) 
                     else:
                         First = False
                 src.seenouttask = tt
                 src.seenout = True
         dst.received.append(t)
+        fobs = (isinstance(src,VariableNode) and src.role == "observed") and "OBS" or ""
         if src.seenouttask is not None:
             # src is an post message
-            t.name = "%s(OUT)->%s #%d" % (src.name,dst.name,i)
+            t.name = "%s*->%s %s #%d" % (src.name,dst.name,fobs,i)
             t.cost = src.costoutmessage(dst)
             t.addparent(src.seenouttask)
-            baseindex = src.seenouttask.index
+            lo = lastof.get(src)
+            if lo and lo.index >= t.index:
+                t.addparent(lo)
         else:
-            t.name = "%s->%s #%d" % (src.name,dst.name,i)
+            t.name = "%s->%s %s #%d" % (src.name,dst.name,fobs,i)
             t.cost = dst.costinmessage(src)
-            baseindex = 0
+            # chain the writing
+            lo = lastof.get(src)
+            if lo:
+                t.addparent(lo)
 
-        # given PGM we can assume that ANY update BEFORE the first OUT can be IGNORED 
-        if baseindex == 0:
-            # all 
-            for p in lastof[src]:
-                print "addlastof",dst.name,"for dst->src",src.name,"index",t.index,"using",p.index
-                t.addparent(p)
-        else:
-            # only before the baseindex
-            for p in lastof[src][-1::-1]:
-                if p.index < baseindex:
-                    break
-                print "addlastof",dst.name,"for dst->src",src.name,"index",t.index,"using",p.index
-                t.addparent(p)
-
-        print "newlastof",dst.name,"with",t.index
-        lastof[dst].append(t)
+        lastof[dst] = t
         tasks.append(t)
+
+    for v in q.vars.values():
+        if v.role == "regular":
+            print "belief",v.name
+            lo = lastof.get(v)
+            t = Task("belief\n%s" % v.name,"belief",None)
+            t.node = v
+            t.index = i
+            tasks.append(t)
+            if lo:
+                t.addparent(lo)
+            lastof[v] = t
 
     toposorttasks(tasks)
     # NOTE: transitive reduction 
@@ -382,8 +404,9 @@ if __name__ == "__main__":
 
     print "transitive reduction removed ",n
 
+    emitdot(tasks,"out.dot")
     emitdot(tasks,"out.png")
-    emitdotsched(tasks,"out.dot")
+    emitdotsched(tasks,"outsched.dot")
 
     #sort topologically
     for q in tasks:
