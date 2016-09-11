@@ -57,23 +57,22 @@ def toposorttasks(data,sort=True):
 
 
 class Task:
-    def __init__(self,name,role,message):
+    def __init__(self,name,role,node,index,message=None):
         self.name = name
         self.role = role # aggregate messages, message, belief, observation
-        self.node = None
+        self.node = node # target 
+        self.index = index
         self.message = message
-        self.parents = []
-        self.schildren = set()
-        self.children = []
+        self.parents = set()
+        self.children = set()
         self.cost = 0
         self.items = 1
     def addchild(self,t):
-        if not t in self.schildren:
-            self.children.append(t)
-            t.parents.append(self)
-            self.schildren.add(t)
+        self.children.add(t)
+        t.parents.add(self)
     def addparent(self,t):
-        t.addchild(self)
+        if t is not None:
+            t.addchild(self)
     def __repr__(self):
         return "Task(%s,%s,#p%d,#c%d)" % (self.name,self.action,len(self.parents),len(self.children))
 
@@ -87,7 +86,6 @@ class Node:
         self.name = name
         self.id = id
         #for scheduling
-        self.seenouttask = None
         self.received = []
     def inmessagetype(self,other):
         # compute the size of the message exchanged, corresponds to the size of which is a variable of the two
@@ -343,8 +341,9 @@ def pgmtasks2code(pgm,tasks,out):
             #t.message = src,dst 
         elif t.role == "collect":
             #all parents are Tasks with messages 
+            dst = t.node
             for p in t.parents:
-                src,dst = p.message
+                src = p.node
                 thevar = isinstance(src,VariableNode) and src or dst
                 vad = max(thevar.ddim,thevar.gdim)
                 outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
@@ -422,17 +421,12 @@ if __name__ == "__main__":
         for v in pgm.vars.values():        
             if v.role == "observed":
                 for f in v.adjacent():
-                    t = Task("obs %s\nto %s" % (v.name,f.name),"observation",(v,f))
-                    t.index = 1
-                    w = lastof.get(f)
-                    if w: 
-                        t.addparent(w)
+                    t = Task("obs %s\nto %s" % (v.name,f.name),"observation",message=(v,f),node=f,index=1)
+                    t.addparent(lastof[f])
                     lastof[f] = t
                     tasks.append(t)
+    collects = defaultdict(lambda:1)
     for src,dst in pgm.sched:
-        i = i + 1
-        t = Task("","message",(src,dst))
-        t.index = i
         if src == dst:
             print "UNSUPPORTED NL SELF MESSAGE"
             break
@@ -440,11 +434,13 @@ if __name__ == "__main__":
             # no need to create seenout
             print src.name,dst.name,"sends without having received"
             pass        
+        # TODO if there is just one then make the collect contextual to the previous: messageapply instead of message(make)
         else:
-            print src.name,dst.name,"sends needs collecting",len(src.received)
-            tt = Task("%s" % src.name,"collect",None)
-            tt.node = src
-            tt.index = t.index
+            print src.name,"sends needs collecting",len(src.received)
+            cid = collects[src.name]
+            collects[src.name] = cid + 1
+            i += 1
+            tt = Task("%s collect#%d" % (src.name,cid),"collect",node=src,index=i)
             tasks.append(tt)
             First = True
             for qq in src.received:
@@ -453,40 +449,29 @@ if __name__ == "__main__":
                     tt.cost += src.costaggregate(qq.message[0]) 
                 else:
                     First = False
+            tt.addparent(lastof.get(src)) # PROBABLY the one of the above addparent
+            lastof[src] = tt
             src.received = []
-            src.seenouttask = tt
-        dst.received.append(t)
-        fobs = (isinstance(src,VariableNode) and src.role == "observed") and "OBS" or ""
-        if src.seenouttask is not None:
-            # src is an post message
-            t.name = "%s*->%s %s #%d" % (src.name,dst.name,fobs,i)
-            t.cost = src.costoutmessage(dst)
-            t.addparent(src.seenouttask)
-            lo = lastof.get(src)
-            if lo and lo.index >= t.index:
-                t.addparent(lo)
-        else:
-            t.name = "%s->%s %s #%d" % (src.name,dst.name,fobs,i)
-            t.cost = dst.costinmessage(src)
-            # chain the writing
-            lo = lastof.get(src)
-            if lo:
-                t.addparent(lo)
 
-        lastof[dst] = t
+        fobs = (isinstance(src,VariableNode) and src.role == "observed") and "OBS" or ""
+        i += 1
+        t = Task("%s->%s %s #%d" % (src.name,dst.name,fobs,i),"message",message=(src,dst),index=i,node=dst)
+        t.cost = dst.costinmessage(src)
+        t.addparent(lastof.get(dst)) # needed for combining the output of dst
+        t.addparent(lastof.get(src)) # needed for using src (should be the just created collect above)
         tasks.append(t)
+
+        dst.received.append(t)
+        lastof[dst.name] = t
 
     for v in pgm.vars.values():
         if v.role == "regular":
             if len(v.received) > 0:
                 print "post execution collect",v.name,len(v.received)
                 i += 1
-                tt = Task("final %s" % v.name,"collect",None)
-                tt.node = v
-                tt.index = i
+                tt = Task("%s collect final" % v.name,"collect",node=v,index=i)
                 tasks.append(tt)
-                if lastof[v]:
-                    tt.addparent(lastof[v])
+                tt.addparent(lastof.get(v))
                 First = True
                 for tre in v.received:
                     tt.addparent(tre)
@@ -495,14 +480,10 @@ if __name__ == "__main__":
                     else:
                         First = False                
                 lastof[v]  = tt
-            lo = lastof.get(v)
             i += 1
-            t = Task("belief\n%s" % v.name,"belief",None)
-            t.node = v
-            t.index = i
+            t = Task("belief\n%s" % v.name,"belief",node=v,index=i)
             tasks.append(t)
-            if lo:
-                t.addparent(lo)
+            t.addparent(lastof.get(v))
             lastof[v] = t
 
     try:
