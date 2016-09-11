@@ -1,4 +1,5 @@
-# TODO in original sched: prior should not receive incoming messages NOT needed
+# TODO: prune graph/schedule of the leaf non ending in belief
+#   e.g. in our case they are 
 import json
 from collections import defaultdict
 from functools import reduce as _reduce
@@ -493,13 +494,15 @@ if __name__ == "__main__":
                 tt.node = v
                 tt.index = i
                 tasks.append(tt)
+                if lastof[v]:
+                    tt.addparent(lastof[v])
                 First = True
                 for tre in v.received:
                     tt.addparent(tre)
                     if not First:
                         tt.cost += v.costaggregate(tre.message[0]) 
                     else:
-                        First = False
+                        First = False                
                 lastof[v]  = tt
             lo = lastof.get(v)
             i += 1
