@@ -87,7 +87,6 @@ class Node:
         self.name = name
         self.id = id
         #for scheduling
-        self.seenout = False
         self.seenouttask = None
         self.received = []
     def inmessagetype(self,other):
@@ -437,33 +436,25 @@ if __name__ == "__main__":
         if src == dst:
             print "UNSUPPORTED NL SELF MESSAGE"
             break
-        if not src.seenout:
-            # this is the first output of the factor, if it has received message we need to create the seenout task
-            # that collects 
-            if len(src.received) == 0:
-                # no need to create seenout
-                print src.name,dst.name,"sends without having received"
-                pass
-            elif len(src.received) == 1:
-                src.seenouttask = src.received[0]
-                print src.name,dst.name,"sends having received 1"
-                src.seenout = True
-            else:
-                print src.name,dst.name,"sends needs collecting",len(src.received)
-                tt = Task("%s" % src.name,"collect",None)
-                tt.node = src
-                tt.index = t.index
-                tasks.append(tt)
-                First = True
-                for qq in src.received:
-                    tt.addparent(qq)
-                    if not First:
-                        tt.cost += src.costaggregate(qq.message[0]) 
-                    else:
-                        First = False
-                src.received = []
-                src.seenouttask = tt
-                src.seenout = True
+        if len(src.received) == 0:
+            # no need to create seenout
+            print src.name,dst.name,"sends without having received"
+            pass        
+        else:
+            print src.name,dst.name,"sends needs collecting",len(src.received)
+            tt = Task("%s" % src.name,"collect",None)
+            tt.node = src
+            tt.index = t.index
+            tasks.append(tt)
+            First = True
+            for qq in src.received:
+                tt.addparent(qq)
+                if not First:
+                    tt.cost += src.costaggregate(qq.message[0]) 
+                else:
+                    First = False
+            src.received = []
+            src.seenouttask = tt
         dst.received.append(t)
         fobs = (isinstance(src,VariableNode) and src.role == "observed") and "OBS" or ""
         if src.seenouttask is not None:
