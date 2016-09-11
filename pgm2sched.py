@@ -1,5 +1,4 @@
-#TODO observations
-#TODO paralel beliefs
+# TODO in original sched: prior should not receive incoming messages NOT needed
 import json
 from collections import defaultdict
 from functools import reduce as _reduce
@@ -122,6 +121,8 @@ class VariableNode(Node):
         self.ddim = 0
         self.gdim = 0
         self.factors = [] 
+    def isdiscrete(self):
+        return self.xtype == "discrete"
     def adjacent(self):
         return self.factors
     def __repr__(self):
@@ -135,6 +136,7 @@ class FactorNode(Node):
         self.dvars = []
         self.gvars = []
         self.prior = False
+        self.varlocation = {} # for each variable the location (offset or dimension)
         self.ddim = 0
         self.gdim = 0
     def adjacent(self):
@@ -306,14 +308,109 @@ def transitivereduction(tasks):
         if before != after:
             print "reduced",t.name,"of",before-after    
     return n
+
+def pgmtasks2code(pgm,tasks,out):
+    out = open(out,"w")
+
+    outs = []
+    outm = set()
+    outa = []
+    for v in pgm.vars.values():
+        # declare variables
+        # declare the message stores
+        d = max(v.gdim,v.ddim)
+        outa.append("variable %s %d %s" % (v.xtype,d,v.name))
+    for f in pgm.facs.values():
+        # declare factors, allocating indices of variables
+        # declare the message stores
+        outs.append("factor %s %d %d %s" % (f.xtype,f.ddim,f.gdim,f.name))
+    # then process based on tasks
+    for i,t in enumerate(tasks):
+        if t.role == "message":
+            src,dst = t.message
+            thevar = isinstance(src,VariableNode) and src or dst
+            vad = max(thevar.ddim,thevar.gdim)
+            fobs = (isinstance(src,VariableNode) and src.role == "observed")
+            if fobs:
+                outs.append("T%03d condition %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,dst.name,dst.name))
+            else:
+                outm.add("message %s %d %s" % (thevar.xtype,vad,src.name + "__" + dst.name))
+                outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
+                #make 1
+                #1make msg if needed 
+                outs.append("T%03d divide_marg_except %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,src.name + "__" + dst.name,dst.name + "__" + src.name))
+
+            #t.message = src,dst 
+        elif t.role == "collect":
+            #all parents are Tasks with messages 
+            for p in t.parents:
+                src,dst = p.message
+                thevar = isinstance(src,VariableNode) and src or dst
+                vad = max(thevar.ddim,thevar.gdim)
+                outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
+                outs.append("T%03d product_over %s %d %s %s" % (i,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
+
+        elif t.role == "belief":
+            outs.append("T%03d belief %s" % (i,t.node.name))
+        else:
+            print "unknonw task action"
+    out.write("\n".join(outa))
+    out.write("\n")
+    out.write("\n".join(outm))
+    out.write("\n")
+    out.write("\n".join(outs))
+
+def pgmsched2code(pgm,out):
+    out = open(out,"w")
+
+    outs = []
+    outm = set()
+    outa = []
+    for v in pgm.vars.values():
+        # declare variables
+        # declare the message stores
+        d = max(v.gdim,v.ddim)
+        outa.append("variable %s %d %s" % (v.xtype,d,v.name))
+    for f in pgm.facs.values():
+        # declare factors, allocating indices of variables
+        # declare the message stores
+        outs.append("factor %s %d %d %s" % (f.xtype,f.ddim,f.gdim,f.name))
+    # then process based on tasks
+    i = 0;
+    for src,dst in pgm.sched:
+        thevar = isinstance(src,VariableNode) and src or dst
+        vad = max(thevar.ddim,thevar.gdim)
+        fobs = (isinstance(src,VariableNode) and src.role == "observed")
+        if fobs:
+            outs.append("T%03d condition %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,dst.name,dst.name))
+            i += 1
+        else:
+            outm.add("message %s %d %s" % (thevar.xtype,vad,src.name + "__" + dst.name))
+            outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
+            #make 1
+            #1make msg if needed 
+            outs.append("T%03d divide_marg_except %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,src.name + "__" + dst.name,dst.name + "__" + src.name))
+            outs.append("T%03d product_over %s %d %s %s" % (i+1,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
+            i += 2
+    for v in pgm.vars.values():
+        # declare variables
+        # declare the message stores
+        if v.role == "regular":
+            outs.append("T%03d belief %s " % (i,v.name))
+            i += 1
+    out.write("\n".join(outa))
+    out.write("\n")
+    out.write("\n".join(outm))
+    out.write("\n")
+    out.write("\n".join(outs))
 if __name__ == "__main__":
     import sys
-    q = Pgm(sys.argv[1])
-    for a,b in q.sched:
+    pgm = Pgm(sys.argv[1])
+    for a,b in pgm.sched:
         print a,"->",b
-    print q.vars
-    print q.facs
-    emitgraph(q,"graph.png")
+    print pgm.vars
+    print pgm.facs
+    emitgraph(pgm,"graph.png")
 
     print "TODO: cleanup some messages"
 
@@ -322,7 +419,7 @@ if __name__ == "__main__":
     i = 1
     # add observations with enforcement of sequentiality in factors
     if False: # already done by schedule
-        for v in q.vars.values():        
+        for v in pgm.vars.values():        
             if v.role == "observed":
                 for f in v.adjacent():
                     t = Task("obs %s\nto %s" % (v.name,f.name),"observation",(v,f))
@@ -332,7 +429,7 @@ if __name__ == "__main__":
                         t.addparent(w)
                     lastof[f] = t
                     tasks.append(t)
-    for src,dst in q.sched:
+    for src,dst in pgm.sched:
         i = i + 1
         t = Task("","message",(src,dst))
         t.index = i
@@ -363,6 +460,7 @@ if __name__ == "__main__":
                         tt.cost += src.costaggregate(qq.message[0]) 
                     else:
                         First = False
+                src.received = []
                 src.seenouttask = tt
                 src.seenout = True
         dst.received.append(t)
@@ -386,10 +484,25 @@ if __name__ == "__main__":
         lastof[dst] = t
         tasks.append(t)
 
-    for v in q.vars.values():
+    for v in pgm.vars.values():
         if v.role == "regular":
-            print "belief",v.name
+            if len(v.received) > 0:
+                print "post execution collect",v.name,len(v.received)
+                i += 1
+                tt = Task("final %s" % v.name,"collect",None)
+                tt.node = v
+                tt.index = i
+                tasks.append(tt)
+                First = True
+                for tre in v.received:
+                    tt.addparent(tre)
+                    if not First:
+                        tt.cost += v.costaggregate(tre.message[0]) 
+                    else:
+                        First = False
+                lastof[v]  = tt
             lo = lastof.get(v)
+            i += 1
             t = Task("belief\n%s" % v.name,"belief",None)
             t.node = v
             t.index = i
@@ -398,11 +511,14 @@ if __name__ == "__main__":
                 t.addparent(lo)
             lastof[v] = t
 
-    toposorttasks(tasks)
-    # NOTE: transitive reduction 
-    n = transitivereduction(tasks)
+    try:
+        toposorttasks(tasks)
+        # NOTE: transitive reduction 
+        n = transitivereduction(tasks)
+        print "transitive reduction removed ",n
+    except:
+        pass
 
-    print "transitive reduction removed ",n
 
     emitdot(tasks,"out.dot")
     emitdot(tasks,"out.png")
@@ -416,4 +532,6 @@ if __name__ == "__main__":
         else:
             print
 
+    pgmtasks2code(pgm,tasks,"outtask.txt")
+    pgmsched2code(pgm,"outsched.txt")
 
