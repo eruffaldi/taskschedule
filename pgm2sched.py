@@ -3,7 +3,7 @@
 import json
 from collections import defaultdict
 from functools import reduce as _reduce
-
+import re
 
 # Taken from: https://pypi.python.org/pypi/toposort/1.0
 def toposort(data):
@@ -74,7 +74,7 @@ class Task:
         if t is not None:
             t.addchild(self)
     def __repr__(self):
-        return "Task(%s,%s,#p%d,#c%d)" % (self.name,self.action,len(self.parents),len(self.children))
+        return "Task(%s,%s,#p%d,#c%d)" % (self.name,self.role,len(self.parents),len(self.children))
 
 class Domain:
     def __init__(self,name,values):
@@ -307,8 +307,9 @@ def transitivereduction(tasks):
             print "reduced",t.name,"of",before-after    
     return n
 
-def pgmtasks2code(pgm,tasks,out):
-    out = open(out,"w")
+def pgmtasks2code(pgm,tasks,outfile=None):
+    if outfile is not None:
+        out = open(outfile,"w")
 
     outs = []
     outm = set()
@@ -317,26 +318,26 @@ def pgmtasks2code(pgm,tasks,out):
         # declare variables
         # declare the message stores
         d = max(v.gdim,v.ddim)
-        outa.append("variable %s %d %s" % (v.xtype,d,v.name))
+        outa.append(["variable",v.xtype,d,v.name])
     for f in pgm.facs.values():
         # declare factors, allocating indices of variables
         # declare the message stores
-        outs.append("factor %s %d %d %s" % (f.xtype,f.ddim,f.gdim,f.name))
+        outs.append(["factor",f.xtype,f.ddim,f.gdim,f.name])
     # then process based on tasks
-    for i,t in enumerate(tasks):
+    for t in tasks:   
         if t.role == "message":
             src,dst = t.message
             thevar = isinstance(src,VariableNode) and src or dst
             vad = max(thevar.ddim,thevar.gdim)
             fobs = (isinstance(src,VariableNode) and src.role == "observed")
             if fobs:
-                outs.append("T%03d condition %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,dst.name,dst.name))
+                outs.append(["T%03d" % t.index,"condition",thevar.xtype,vad,src.name,dst.name,"=>",dst.name])
             else:
-                outm.add("message %s %d %s" % (thevar.xtype,vad,src.name + "__" + dst.name))
-                outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
+                outm.add(("message",thevar.xtype,vad,src.name+"__"+dst.name))
+                outm.add(("message",thevar.xtype,vad,dst.name+"__"+src.name))
                 #make 1
                 #1make msg if needed 
-                outs.append("T%03d divide_marg_except %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,src.name + "__" + dst.name,dst.name + "__" + src.name))
+                outs.append(["T%03d" % t.index,"divide_marg_except",thevar.xtype,vad,src.name,src.name + "__" + dst.name,"=>",dst.name + "__" + src.name])
 
             #t.message = src,dst 
         elif t.role == "collect":
@@ -346,21 +347,22 @@ def pgmtasks2code(pgm,tasks,out):
                 src = p.message[0]
                 thevar = isinstance(src,VariableNode) and src or dst
                 vad = max(thevar.ddim,thevar.gdim)
-                outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
-                outs.append("T%03d product_over type=%s size=%d dst=%s src=%s" % (i,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
+                outm.add(("message","thevar.xtype",vad,dst.name + "__" + src.name))
+                outs.append(["T%03d" % t.index,"product_over",thevar.xtype,vad,dst.name,dst.name + "__" + src.name])
 
         elif t.role == "belief":
-            outs.append("T%03d belief %s" % (i,t.node.name))
+            outs.append(["T%03d" % t.index,"belief",t.node.name])
         else:
             print "unknonw task action"
-    out.write("\n".join(outa))
-    out.write("\n")
-    out.write("\n".join(outm))
-    out.write("\n")
-    out.write("\n".join(outs))
 
-def pgmsched2code(pgm,out):
-    out = open(out,"w")
+    r = outa + list(outm) + outs
+    if outfile is not None:
+        out.write("\n".join([" ".join(str(y)) for y in r]))
+    return r
+
+def pgmsched2code(pgm,outfile=None):
+    if outfile is not None:
+        out = open(outfile,"w")
 
     outs = []
     outm = set()
@@ -369,41 +371,142 @@ def pgmsched2code(pgm,out):
         # declare variables
         # declare the message stores
         d = max(v.gdim,v.ddim)
-        outa.append("variable %s %d %s" % (v.xtype,d,v.name))
+        outa.append(["variable",v.xtype,d,v.name])
     for f in pgm.facs.values():
         # declare factors, allocating indices of variables
         # declare the message stores
-        outs.append("factor %s %d %d %s" % (f.xtype,f.ddim,f.gdim,f.name))
+        outs.append(["factor",f.xtype,f.ddim,f.gdim,f.name])
     # then process based on tasks
     i = 0;
     for src,dst in pgm.sched:
+        i = i + 1;
         thevar = isinstance(src,VariableNode) and src or dst
         vad = max(thevar.ddim,thevar.gdim)
         fobs = (isinstance(src,VariableNode) and src.role == "observed")
         if fobs:
-            outs.append("T%03d condition %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,dst.name,dst.name))
-            i += 1
+            outs.append(["T%03d" % i,"condition",thevar.xtype,vad,src.name,dst.name,"=>",dst.name])
         else:
-            outm.add("message %s %d %s" % (thevar.xtype,vad,src.name + "__" + dst.name))
-            outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
+            outm.add(("message",thevar.xtype,vad,src.name + "__" + dst.name))
+            outm.add(("message",thevar.xtype,vad,dst.name + "__" + src.name))
             #make 1
             #1make msg if needed 
-            outs.append("T%03d divide_marg_except %s %d %s %s => %s" % (i,thevar.xtype,vad,src.name,src.name + "__" + dst.name,dst.name + "__" + src.name))
-            outs.append("T%03d product_over %s %d %s %s" % (i+1,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
-            i += 2
+            outs.append(["T%03d" %i,"divide_marg_except",thevar.xtype,vad,src.name,src.name + "__" + dst.name,"=>",dst.name + "__" + src.name])
+            i += 1
+            outs.append(["T%03d" %i,"product_over",thevar.xtype,vad,dst.name,dst.name + "__" + src.name])
     for v in pgm.vars.values():
         # declare variables
         # declare the message stores
         if v.role == "regular":
-            outs.append("T%03d belief %s " % (i,v.name))
             i += 1
-    out.write("\n".join(outa))
-    out.write("\n")
-    out.write("\n".join(outm))
-    out.write("\n")
-    out.write("\n".join(outs))
+            outs.append(["T%03d" %i,"belief",v.name])
+    r = outa + list(outm) + outs
+    if outfile is not None:
+        out.write("\n".join([" ".join([str(w) for w in y]) for y in r]))
+    return r
+
+codebody = """
+    #include "common.hpp"
+
+    class $classname
+    {
+    public:
+        $classname();
+        void run();
+    private:
+        $variables
+        $factors
+        $messages
+        $support
+    };
+
+    void $classname::run()
+    {
+        $code
+    }
+
+    int main(int argc, char * argv[])
+    {
+        $classname p;
+        $initsupport
+        p.run();
+        return  0;
+    }
+"""
+
+def tasks2cpp(pgm,tasks,outfile):
+    out = open(outfile,"w")
+    # first process variables
+    vars = []
+    messages = []
+    factors = []
+    code = []
+    classname = "sched";
+    outm = set()
+
+    for v in pgm.vars.values():
+        d = max(v.gdim,v.ddim)
+        # TODO gen and store in vars
+        #outa.append(["variable",v.xtype,d,v.name])
+    for f in pgm.facs.values():
+        # declare factors, allocating indices of variables
+        # declare the message stores
+        # TODO gen and store in factors
+        pass
+        #outs.append(["factor",f.xtype,f.ddim,f.gdim,f.name])
+    # then process based on tasks
+    for t in tasks:
+        if t.role == "message":
+            src,dst = t.message
+            thevar = isinstance(src,VariableNode) and src or dst
+            vad = max(thevar.ddim,thevar.gdim)
+            fobs = (isinstance(src,VariableNode) and src.role == "observed")
+            if fobs:
+                #outs.append(["T%03d" % t.index,"condition",thevar.xtype,vad,src.name,dst.name,"=>",dst.name])
+                pass
+            else:
+                outm.add((thevar.xtype,vad,src.name+"__"+dst.name))
+                outm.add((thevar.xtype,vad,dst.name+"__"+src.name))
+                #make 1
+                #1make msg if needed 
+                #outs.append(["T%03d" % t.index,"divide_marg_except",thevar.xtype,vad,src.name,src.name + "__" + dst.name,"=>",dst.name + "__" + src.name])
+
+            #t.message = src,dst 
+        elif t.role == "collect":
+            #all parents are Tasks with messages 
+            dst = t.node
+            for p in t.parents:
+                src = p.message[0]
+                thevar = isinstance(src,VariableNode) and src or dst
+                vad = max(thevar.ddim,thevar.gdim)
+                outm.add((thevar.xtype,vad,dst.name + "__" + src.name))
+                #outs.append(["T%03d" % product_over type=%s size=%d dst=%s src=%s" % (i,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
+
+        elif t.role == "belief":
+            #outs.append(["T%03d" % t.index,"belief",t.node.name])
+            pass
+        else:
+            print "unknonw task action"
+
+    for xtype,vad,name in outm:
+        pass
+        # TODO generate message
+
+    # wrap: << for runner => add to support and then loading in initsupport
+    # wrap: openmp task => define the dependency vars
+    # wrap none
+
+
+    rep = dict(classname="sched",messages="\n".join(messages),factors="\n".join(factors),variables="\n".join(vars))
+    rep = dict((re.escape(k), v) for k, v in rep.iteritems())
+    pattern = re.compile("|".join(rep.keys()))
+    text = pattern.sub(lambda m: rep[re.escape(m.group(0))], codebody)
+    out.write(text)
 if __name__ == "__main__":
-    import sys
+    import sys,argparse
+    import argparse
+    #parser = argparse.ArgumentParser(description='Task Scheduling for Multiprocessor - Emanuele Ruffaldi 2016 SSSA')
+    #args = parser.parse_args()
+
     pgm = Pgm(sys.argv[1])
     for a,b in pgm.sched:
         print a,"->",b
@@ -415,13 +518,14 @@ if __name__ == "__main__":
 
     tasks = []
     lastof = dict()
-    i = 1
+    i = 0
     # add observations with enforcement of sequentiality in factors
     if False: # already done by schedule
         for v in pgm.vars.values():        
             if v.role == "observed":
                 for f in v.adjacent():
-                    t = Task("obs %s\nto %s" % (v.name,f.name),"observation",message=(v,f),node=f,index=1)
+                    i += 1
+                    t = Task("obs %s\nto %s" % (v.name,f.name),"observation",message=(v,f),node=f,index=i)
                     t.addparent(lastof[f])
                     lastof[f] = t
                     tasks.append(t)
@@ -509,4 +613,5 @@ if __name__ == "__main__":
 
     pgmtasks2code(pgm,tasks,"outtask.txt")
     pgmsched2code(pgm,"outsched.txt")
+    tasks2cpp(pgm,tasks,"outtask.cpp")
 
