@@ -343,11 +343,11 @@ def pgmtasks2code(pgm,tasks,out):
             #all parents are Tasks with messages 
             dst = t.node
             for p in t.parents:
-                src = p.node
+                src = p.message[0]
                 thevar = isinstance(src,VariableNode) and src or dst
                 vad = max(thevar.ddim,thevar.gdim)
                 outm.add("message %s %d %s" % (thevar.xtype,vad,dst.name + "__" + src.name))
-                outs.append("T%03d product_over %s %d %s %s" % (i,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
+                outs.append("T%03d product_over type=%s size=%d dst=%s src=%s" % (i,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
 
         elif t.role == "belief":
             outs.append("T%03d belief %s" % (i,t.node.name))
