@@ -67,6 +67,7 @@ class Task:
         self.children = set()
         self.cost = 0
         self.items = 1
+        self.code = []
     def addchild(self,t):
         self.children.add(t)
         t.parents.add(self)
@@ -413,15 +414,15 @@ codebody = """
         $classname();
         void run();
     private:
-        $variables
-        $factors
-        $messages
-        $support
+$variables
+$factors
+$messages
+$support
     };
 
     void $classname::run()
     {
-        $code
+$code
     }
 
     int main(int argc, char * argv[])
@@ -433,27 +434,56 @@ codebody = """
     }
 """
 
+def makevar(xtype,dim,name):
+    if xtype == "gaussian":
+        return "\t\tGaussianVariable var_%s = {\"%s\",%d};" % (name,name,dim)
+    elif xtype == "discrete":
+        return "\t\tDiscreteVariable var_%s = {\"%s\",DiscreteDomain(\"\",%d)};" % (name,name,dim);
+def makefactor(xtype,dvars,gvars,name):
+    #if gdim is None dim depends on ddim and type
+    if gvars is None:
+        gvars = dvars
+    if xtype == "gaussian":
+        return "\t\tLinearGaussianFactor %s = {\"%s\",{%s}};" % (name,name,",".join(gvars))
+    elif xtype == "discrete":
+        return "\t\tDiscreteFactor %s = {\"%s\",{%s}};" % (name,name,",".join(dvars));
+    elif xtype == "gmm":
+        return "\t\tMixtureGaussianFactor %s = {\"%s\",{%s},{%s}};" % (name,name,",".join(dvars),",".join(gvars));
+
 def tasks2cpp(pgm,tasks,outfile):
     out = open(outfile,"w")
     # first process variables
     vars = []
+    ovars =[]
+    mvars = []
     messages = []
     factors = []
     code = []
     classname = "sched";
     outm = set()
 
+    vars.append("// TODO DiscreteDomain declaration")
     for v in pgm.vars.values():
         d = max(v.gdim,v.ddim)
-        # TODO gen and store in vars
-        #outa.append(["variable",v.xtype,d,v.name])
+        vars.append(makevar(v.xtype,d,v.name))
+        mvars.append(makefactor(v.xtype,["&var_"+v.name],None,"m_"+v.name))
+        if v.role == "observed":
+            if v.ddim != 0:
+                ovars.append("\t\tint varobs_%s;" % v.name)
+            else:
+                ovars.append("\t\tEigen::VectorXd varobs_%s(%d);" % (v.name,d))
+    vars.extend(mvars)
+    vars.extend(ovars)
     for f in pgm.facs.values():
-        # declare factors, allocating indices of variables
-        # declare the message stores
-        # TODO gen and store in factors
-        pass
-        #outs.append(["factor",f.xtype,f.ddim,f.gdim,f.name])
-    # then process based on tasks
+        factors.append(makefactor(f.xtype,["&var_"+x.name for x in f.dvars],["&var_"+x.name for x in f.gvars],"m_"+f.name))
+
+
+    # TODO: associate code to task so we can decide scheduling
+    # TODO scheduling code gen:
+    #   - seq
+    #   - openmp task (needs dependnecy var)
+    #   - task runner
+    #   - decoded task runner (needs barriers var)
     for t in tasks:
         if t.role == "message":
             src,dst = t.message
@@ -462,14 +492,15 @@ def tasks2cpp(pgm,tasks,outfile):
             fobs = (isinstance(src,VariableNode) and src.role == "observed")
             if fobs:
                 #outs.append(["T%03d" % t.index,"condition",thevar.xtype,vad,src.name,dst.name,"=>",dst.name])
-                pass
+                if src.xtype == "discrete":
+                    t.code.append("\t\tm_%s.condition(varobs_%s,&var_%s);" % (dst.name,thevar.name,thevar.name))
+                else:
+                    t.code.append("\t\tm_%s.condition(varobs_%s,&var_%s);" % (dst.name,thevar.name,thevar.name))
             else:
-                outm.add((thevar.xtype,vad,src.name+"__"+dst.name))
-                outm.add((thevar.xtype,vad,dst.name+"__"+src.name))
-                #make 1
-                #1make msg if needed 
-                #outs.append(["T%03d" % t.index,"divide_marg_except",thevar.xtype,vad,src.name,src.name + "__" + dst.name,"=>",dst.name + "__" + src.name])
+                outm.add((thevar.xtype,vad,"m_"+src.name+"__"+dst.name,thevar))
+                outm.add((thevar.xtype,vad,"m_"+dst.name+"__"+src.name,thevar))
 
+                t.code.append("\t\tm_%s = (m_%s/m_%s).marg_except(&var_%s); // optimize me" % (dst.name+"__"+src.name,src.name,src.name+"__"+dst.name,thevar.name))
             #t.message = src,dst 
         elif t.role == "collect":
             #all parents are Tasks with messages 
@@ -478,17 +509,15 @@ def tasks2cpp(pgm,tasks,outfile):
                 src = p.message[0]
                 thevar = isinstance(src,VariableNode) and src or dst
                 vad = max(thevar.ddim,thevar.gdim)
-                outm.add((thevar.xtype,vad,dst.name + "__" + src.name))
-                #outs.append(["T%03d" % product_over type=%s size=%d dst=%s src=%s" % (i,thevar.xtype,vad,dst.name,dst.name + "__" + src.name))
-
+                outm.add((thevar.xtype,vad,"m_"+thevar.name,thevar))
+                t.code.append("\t\tm_%s *= m_%s;" % (dst.name,dst.name + "__" + src.name))
         elif t.role == "belief":
-            #outs.append(["T%03d" % t.index,"belief",t.node.name])
-            pass
+            t.code.append("\t\tcompute_belief(v_%s,m_%s);" % (t.node.name,t.node.name))
         else:
             print "unknonw task action"
 
-    for xtype,vad,name in outm:
-        pass
+    for xtype,vad,name,thevar in outm:
+        messages.append(makefactor(xtype,["&var_"+thevar.name],None,name))
         # TODO generate message
 
     # wrap: << for runner => add to support and then loading in initsupport
@@ -496,8 +525,11 @@ def tasks2cpp(pgm,tasks,outfile):
     # wrap none
 
 
-    rep = dict(classname="sched",messages="\n".join(messages),factors="\n".join(factors),variables="\n".join(vars))
-    rep = dict((re.escape(k), v) for k, v in rep.iteritems())
+    #sequential
+    for t in tasks:
+        code.extend(t.code)
+    rep = dict(classname="sched",messages="\n".join(messages),code="\n".join(code),factors="\n".join(factors),variables="\n".join(vars))
+    rep = dict((re.escape("$"+k), v) for k, v in rep.iteritems())
     pattern = re.compile("|".join(rep.keys()))
     text = pattern.sub(lambda m: rep[re.escape(m.group(0))], codebody)
     out.write(text)
