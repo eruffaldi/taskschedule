@@ -353,8 +353,10 @@ def pgmtasks2code(pgm,tasks,outfile=None):
 
         elif t.role == "belief":
             outs.append(["T%03d" % t.index,"belief",t.node.name])
+        elif t.role == "init":
+            outs.append(["T%03d" % t.index,"init",t.node.name])
         else:
-            print "unknonw task action"
+            print "unknonw task action",t.role
 
     r = outa + list(outm) + outs
     if outfile is not None:
@@ -413,6 +415,8 @@ codebody = """
     public:
         $classname();
         void run();
+        $obsvariables;
+        $initfactors;
     private:
 $variables
 $factors
@@ -461,8 +465,10 @@ def tasks2cpp(pgm,tasks,outfile):
     code = []
     classname = "sched";
     outm = set()
+    initfactors = []
 
     vars.append("// TODO DiscreteDomain declaration")
+    factors.append("// TODO parallelize conditioning and other ops for GMM")
     for v in pgm.vars.values():
         d = max(v.gdim,v.ddim)
         vars.append(makevar(v.xtype,d,v.name))
@@ -473,10 +479,9 @@ def tasks2cpp(pgm,tasks,outfile):
             else:
                 ovars.append("\t\tEigen::VectorXd varobs_%s(%d);" % (v.name,d))
     vars.extend(mvars)
-    vars.extend(ovars)
     for f in pgm.facs.values():
+        initfactors.append(makefactor(f.xtype,["&var_"+x.name for x in f.dvars],["&var_"+x.name for x in f.gvars],"f_"+f.name))
         factors.append(makefactor(f.xtype,["&var_"+x.name for x in f.dvars],["&var_"+x.name for x in f.gvars],"m_"+f.name))
-
 
     # TODO: associate code to task so we can decide scheduling
     # TODO scheduling code gen:
@@ -488,6 +493,7 @@ def tasks2cpp(pgm,tasks,outfile):
         if t.role == "message":
             src,dst = t.message
             thevar = isinstance(src,VariableNode) and src or dst
+            thefactor = thevar == src and dst or src
             vad = max(thevar.ddim,thevar.gdim)
             fobs = (isinstance(src,VariableNode) and src.role == "observed")
             if fobs:
@@ -502,6 +508,9 @@ def tasks2cpp(pgm,tasks,outfile):
 
                 t.code.append("\t\tm_%s = (m_%s/m_%s).marg_except(&var_%s); // optimize me" % (dst.name+"__"+src.name,src.name,src.name+"__"+dst.name,thevar.name))
             #t.message = src,dst 
+        elif t.role == "init":
+            dst = t.node
+            t.code.append("\t\tm_%s = f_%s;" % (dst.name,dst.name))
         elif t.role == "collect":
             #all parents are Tasks with messages 
             dst = t.node
@@ -514,7 +523,7 @@ def tasks2cpp(pgm,tasks,outfile):
         elif t.role == "belief":
             t.code.append("\t\tcompute_belief(v_%s,m_%s);" % (t.node.name,t.node.name))
         else:
-            print "unknonw task action"
+            print "unknonw task action",t.role
 
     for xtype,vad,name,thevar in outm:
         messages.append(makefactor(xtype,["&var_"+thevar.name],None,name))
@@ -524,11 +533,10 @@ def tasks2cpp(pgm,tasks,outfile):
     # wrap: openmp task => define the dependency vars
     # wrap none
 
-
     #sequential
     for t in tasks:
         code.extend(t.code)
-    rep = dict(classname="sched",messages="\n".join(messages),code="\n".join(code),factors="\n".join(factors),variables="\n".join(vars))
+    rep = dict(classname="sched",support="",initsupport="",initfactors="\n".join(initfactors),obsvariables="\n".join(ovars),messages="\n".join(messages),code="\n".join(code),factors="\n".join(factors),variables="\n".join(vars))
     rep = dict((re.escape("$"+k), v) for k, v in rep.iteritems())
     pattern = re.compile("|".join(rep.keys()))
     text = pattern.sub(lambda m: rep[re.escape(m.group(0))], codebody)
@@ -562,6 +570,12 @@ if __name__ == "__main__":
                     lastof[f] = t
                     tasks.append(t)
     collects = defaultdict(lambda:1)
+    for f in pgm.facs.values():
+        i += 1
+        t = Task("init %s" % (f.name),role="init",index=i,node=f)
+        lastof[f] = t
+        tasks.append(t)
+
     for src,dst in pgm.sched:
         if src == dst:
             print "UNSUPPORTED NL SELF MESSAGE"
