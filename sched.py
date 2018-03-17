@@ -872,6 +872,13 @@ def loadtasks(f,dotransitive=False):
     annotatetasks(tasks)
     return tasks
 
+# dynamic mode is a representation of the pure graph with dependencies
+# essentially it is a breadth first visit of the graph from the toplevel
+# the number of processors is the largest size of the BFS
+def dyn(tasks,P,args):
+    print "dyn not implemented"
+    aset = queue([t for t in tasks if len(t.parents) == 0])
+    pass
 
 def xpulp(tasks,P,args):
     """
@@ -1030,7 +1037,7 @@ if __name__ == "__main__":
 
     import argparse
     parser = argparse.ArgumentParser(description='Task Scheduling for Multiprocessor - Emanuele Ruffaldi 2016 SSSA')
-    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none pulp cpa')
+    parser.add_argument('--algorithm',default="cpr",help='chosen algorithm: cpr none pulp cpa dyn')
     parser.add_argument('input',help="input file")  
     parser.add_argument('--cores',type=int,default=4,help="number of cores for the scheduling")
     parser.add_argument('--verbose',action="store_true")
@@ -1076,6 +1083,8 @@ if __name__ == "__main__":
         r = cpa(tasks,args.cores,args)  
     elif args.algorithm == "pulp":
         r = xpulp(tasks,args.cores,args)  
+    elif args.algorithm == "dyn":
+        r = dyn(tasks,args.cores,args)  
     elif args.algorithm == "none":
         print "Tasks",len(tasks)
         for t in tasks:
